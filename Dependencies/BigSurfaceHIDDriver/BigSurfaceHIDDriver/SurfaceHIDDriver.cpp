@@ -119,7 +119,11 @@ IOService *SurfaceHIDDriver::probe(IOService *provider, SInt32 *score) {
     if (!nub)
         return nullptr;
     
-    OSBoolean *type = OSRequiredCast(OSBoolean, nub->getProperty(SURFACE_LEGACY_HID_STRING));
+    OSBoolean *type = OSDynamicCast(OSBoolean, nub->getProperty(SURFACE_LEGACY_HID_STRING));
+    if (!type) {
+        LOG("HID nub does not report its HID type");
+        return nullptr;
+    }
     legacy = type->getValue();
     
 	return this;
