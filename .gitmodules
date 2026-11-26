@@ -1,15 +1,3 @@
 [submodule "MacKernelSDK"]
 	path = MacKernelSDK
 	url = https://github.com/acidanthera/MacKernelSDK
-[submodule "Dependencies/VoodooGPIO"]
-	path = Dependencies/VoodooGPIO
-	url = https://github.com/Xiashangning/VoodooGPIO.git
-[submodule "Dependencies/VoodooSerial"]
-	path = Dependencies/VoodooSerial
-	url = https://github.com/Xiashangning/VoodooSerial.git
-[submodule "Dependencies/VoodooInput"]
-	path = Dependencies/VoodooInput
-	url = https://github.com/Xiashangning/VoodooInput.git
-[submodule "Dependencies/BigSurfaceHIDDriver"]
-	path = Dependencies/BigSurfaceHIDDriver
-	url = https://github.com/Xiashangning/BigSurfaceHIDDriver.git
