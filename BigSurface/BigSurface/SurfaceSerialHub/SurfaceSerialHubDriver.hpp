@@ -10,31 +10,50 @@
 #define SurfaceSerialHubDriver_hpp
 
 #include <IOKit/acpi/IOACPIPlatformDevice.h>
+#include <IOKit/IOLocks.h>
 
 #include "../../../Dependencies/VoodooGPIO/VoodooGPIO/VoodooGPIO.hpp"
 #include "../../../Dependencies/VoodooSerial/VoodooSerial/VoodooUART/VoodooUARTController.hpp"
 #include "SerialProtocol.h"
 
 enum SurfaceSerialEventRegistryType {
-    SurfaceSerialEventHostManagedV1 = 0,
-    SurfaceSerialEventHostManagedV2,
-    SurfaceSerialEventHubManaged,
+    SurfaceSerialEventHostManagedV1 = 0,    // SAM registry (TC 0x01, TID 0x01)
+    SurfaceSerialEventHostManagedV2,        // REG registry (TC 0x21, TID 0x02)
+    SurfaceSerialEventHubManaged,           // KIP registry (TC 0x0e, TID 0x02)
     SurfaceSerialEventTypeCount
 };
 
-#define SSH_REQID_MIN           SSH_TC_COUNT+1
-#define SSH_MSG_CACHE_SIZE      256     // max length for a single message
-#define SSH_MSG_LENGTH_UNKNOWN  (SSH_MSG_CACHE_SIZE+1)
-#define SSH_RING_BUFFER_SIZE    10
-#define SSH_RING_BUFFER_NEXT(pos)   ((pos) + 1) % SSH_RING_BUFFER_SIZE
-#define SSH_ACK_TIMEOUT         50
-#define SSH_CMD_TRAIL_CNT       3
-#define SSH_WAIT_TIMEOUT        (SSH_ACK_TIMEOUT * SSH_CMD_TRAIL_CNT)
+/*
+ * Optional SAM functions, which depend on the model. Mirrors the device groups of
+ * Linux drivers/platform/surface/surface_aggregator_registry.c, keyed by the ACPI
+ * id of the SSAM platform hub (e.g. MSHW0250 for the Surface Laptop 4).
+ */
+enum SurfaceSAMFeature : UInt32 {
+    SurfaceSAMFeatureBattery            = BIT(0),   // BAT/ADP via SAM (7th gen and later)
+    SurfaceSAMFeaturePerformanceMode    = BIT(1),   // TMP platform profile
+    SurfaceSAMFeatureFanProfile         = BIT(2),   // FAN profile follows the platform profile
+    SurfaceSAMFeatureFanSpeed           = BIT(3),   // FAN rpm readout
+    SurfaceSAMFeatureThermalSensors     = BIT(4),   // TMP sensor enumeration
+    SurfaceSAMFeatureLegacyKeyboard     = BIT(5),   // KBD subsystem keyboard (Surface Laptop 1/2)
+};
 
+#define SSH_REQID_MIN           (SSH_TC_COUNT + 1)  // request ids below are reserved for events
+#define SSH_SEQ_HISTORY         8                   // remembered sequence ids for retransmission detection
+#define SSH_SEQ_INVALID         0xffff
+#define SSH_MAX_RESTORED_EVENTS 32
+
+#define SSH_RX_FIFO_SIZE        4096                // bytes buffered between UART and parser
+#define SSH_RX_BUF_SIZE         2048                // largest message the parser accepts
+
+#define SSH_ACK_TIMEOUT         100                 // ms until an un-ACKed packet is resent
+#define SSH_MAX_PACKET_TRIES    3
+#define SSH_RESPONSE_TIMEOUT    1000                // ms until a request without response fails
+#define SSH_REQUEST_TRIES       3                   // attempts for a request that timed out
+#define SSH_NUB_PUBLISH_DELAY   20000               // ms, overridable with "NubPublishDelay"
 
 class EXPORT SurfaceSerialHubClient : public IOService {
     OSDeclareAbstractStructors(SurfaceSerialHubClient);
-    
+
 public:
     /*
      * This method is called when SSH receives corresponding registered events
@@ -49,38 +68,52 @@ class SurfaceHIDNub;
 
 class EXPORT SurfaceSerialHubDriver : public IOService {
     OSDeclareDefaultStructors(SurfaceSerialHubDriver);
-    
+
 public:
+    /*
+     * Send a command without waiting for its response.
+     * Returns the request id, 0 on failure.
+     */
     UInt16 sendCommand(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *payload, UInt16 payload_len, bool seq);
 
-    IOReturn getResponse(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *payload, UInt16 payload_len, bool seq, UInt8 *buffer, UInt16 buffer_len);
+    /*
+     * Send a command and wait for its response. The response is copied into buffer
+     * (truncated to buffer_len); its actual length is returned in received_len if given.
+     * Must not be called from SurfaceSerialHubClient::eventReceived().
+     */
+    IOReturn getResponse(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *payload, UInt16 payload_len, bool seq, UInt8 *buffer, UInt16 buffer_len, UInt16 *received_len = nullptr);
 
     IOReturn registerEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid);
-    
+
     void unregisterEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid);
-    
+
+    bool hasFeature(SurfaceSAMFeature feature) const { return (features & feature) != 0; }
+
+    /* Whether the model was found in the model table, i.e. its features are known */
+    bool isKnownModel() const { return known_model; }
+
     bool init(OSDictionary* properties) override;
-    
+
     IOService* probe(IOService* provider, SInt32* score) override;
 
     bool start(IOService* provider) override;
 
     void stop(IOService* provider) override;
-    
+
     void free() override;
-    
+
     IOReturn setPowerState(unsigned long whichState, IOService *whatDevice) override;
 
     IOReturn enableInterrupt(int source) override;
-    
+
     IOReturn disableInterrupt(int source) override;
 
     IOReturn getInterruptType(int source, int *interruptType) override;
-    
+
     IOReturn registerInterrupt(int source, OSObject *target, IOInterruptAction handler, void *refcon) override;
-    
+
     IOReturn unregisterInterrupt(int source) override;
-    
+
 private:
     class CircleIDCounter {
     private:
@@ -93,7 +126,7 @@ private:
             max = _max;
             id = min-1;
         }
-        
+
         UInt16 getID() {
             UInt16 ret = ++id;
             if (id == max)
@@ -102,43 +135,57 @@ private:
         }
     };
 
-    struct WaitingRequest {
-        queue_entry entry;
-        bool    waiting;
-        UInt16  req_id;
-        UInt8*  data;
-        UInt16  data_len;
-    };
-
-    struct PendingCommand {
+    struct Packet {
         queue_entry entry;
         UInt8*  buffer {nullptr};
         UInt16  len {0};
-        UInt8   trial_count {0};
-        IOTimerEventSource* timer {nullptr};
+        UInt8   seq_id {0};
+        UInt8   tries {0};
     };
 
-    struct MessageCache {
-        UInt8   cache[SSH_MSG_CACHE_SIZE];
-        UInt16  len;
-        UInt16  pos;
-        bool    partial_syn;
+    struct Request {
+        // in
+        UInt8   tc, tid, iid, cid;
+        UInt8*  payload;
+        UInt16  payload_len;
+        bool    seq;
+        bool    wait;
+        bool    force;      // allowed while asleep (D0 entry/exit notifications)
+        UInt8*  buffer;
+        UInt16  buffer_len;
+        // out
+        UInt16  rqid;
+        UInt16  received_len;
     };
 
-    struct RingBuffer {
-        UInt8* buffer;
-        UInt16 filled_len;
+    struct WaitingRequest {
+        queue_entry entry;
+        UInt16  rqid;
+        UInt8*  buffer;
+        UInt16  buffer_len;
+        UInt16  received_len;
+        bool    completed;
+        bool    queued;
     };
-    
+
+    struct EventKey {
+        SurfaceSerialEventRegistryType type;
+        UInt8 tc;
+        UInt8 iid;
+    };
+
     struct EventHandler {
         queue_entry entry;
+        SurfaceSerialEventRegistryType type;
+        UInt8 tc;
         UInt8 target_iid;
         SurfaceSerialHubClient *client;
     };
-    
+
     IOWorkLoop*             work_loop {nullptr};
     IOCommandGate*          command_gate {nullptr};
     IOTimerEventSource*     publish_timer {nullptr};
+    IOTimerEventSource*     retransmit_timer {nullptr};
     IOInterruptEventSource* uart_interrupt {nullptr};
     IOInterruptEventSource* gpio_interrupt {nullptr};
     IOACPIPlatformDevice*   acpi_device {nullptr};
@@ -146,60 +193,92 @@ private:
     VoodooGPIO*             gpio_controller {nullptr};
     SurfaceBatteryNub*      battery_nub {nullptr};
     SurfaceHIDNub*          hid_nub {nullptr};
-    
+
     bool            awake {true};
-    RingBuffer      ring_buffer[SSH_RING_BUFFER_SIZE];
-    int             current {0};
-    int             last {SSH_RING_BUFFER_SIZE-1};
-    MessageCache    rx_msg;
-    queue_head_t    pending_list;
+    UInt32          features {0};
+    bool            known_model {false};
+
+    // UART -> parser byte FIFO, filled on the UART work loop and drained on ours
+    IOSimpleLock*   rx_fifo_lock {nullptr};
+    UInt8*          rx_fifo {nullptr};
+    UInt32          rx_fifo_head {0};
+    UInt32          rx_fifo_count {0};
+    bool            rx_fifo_overrun {false};
+
+    // Parser state: bytes not consumed yet, always starting at a potential SYN
+    UInt8*          rx_buf {nullptr};
+    UInt16          rx_len {0};
+    UInt16          rx_seq_history[SSH_SEQ_HISTORY];
+    UInt8           rx_seq_history_pos {0};
+
+    // Only one sequenced packet may wait for its ACK, the rest are queued (like Linux)
+    queue_head_t    tx_queue;
+    Packet*         tx_inflight {nullptr};
+
     queue_head_t    waiting_list;
     queue_head_t    event_handler_lists[SSH_REQID_MIN];
-    
+
     CircleIDCounter seq_counter {CircleIDCounter(0x00, 0xff)};
     CircleIDCounter req_counter {CircleIDCounter(SSH_REQID_MIN, 0xffff)};
-    
+
     UInt32  baudrate {0};
     UInt8   data_bits {0};
     UInt8   stop_bits {0};
     UInt8   parity {0};
     bool    flow_control {false};
-    UInt16  fifo_size {0};
+    char    uart_resource_source[64];
+    bool    has_gpio {false};
     UInt16  gpio_pin {0};
     UInt16  gpio_irq {0};
-    
+
     void bufferReceived(VoodooUARTController *sender, UInt8 *buffer, UInt16 length);
-    
-    IOReturn sendACK(UInt8 seq_id);
-    
-    IOReturn sendNAK();
-    
-    IOReturn processMessage();
-    
+
     void processReceivedBuffer(IOInterruptEventSource *sender, int count);
-    
-    void delayedPublishingNubs(IOTimerEventSource *sender);
-    
-    void gpioWakeUp(IOInterruptEventSource *sender, int count);
-    
-    void _process(UInt8* buffer, UInt16 length);
-    
-    IOReturn sendCommandGated(UInt8 *tx_buffer, UInt16 *len, bool *seq);
-    
-    void commandTimeout(IOTimerEventSource* timer);
-    
-    IOReturn waitResponse(UInt16 *req_id, UInt8 *buffer, UInt16 *buffer_len);
-    
+
+    void parseReceivedData();
+
+    void processFrame(UInt8 *message, UInt16 length);
+
+    void processCommand(UInt8 frame_type, UInt8 *payload, UInt16 length);
+
+    void resetSeqHistory();
+
+    bool isRetransmission(UInt8 seq_id);
+
+    IOReturn sendControlFrame(UInt8 type, UInt8 seq_id);
+
+    IOReturn submitRequestGated(Request *rq);
+
+    void transmitNextPacket();
+
+    void completeInflightPacket();
+
+    void retransmitTimeout(IOTimerEventSource *timer);
+
+    IOReturn registerHandlerGated(EventHandler *h, bool *exists);
+
+    IOReturn unregisterHandlerGated(SurfaceSerialHubClient *client, UInt8 *tc, UInt8 *iid, EventHandler **removed);
+
     IOReturn sendEventCommand(SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid, bool enable);
-    
+
+    void restoreEvents();
+
+    IOReturn collectEventsGated(EventKey *events, int *count);
+
+    IOReturn notifySAM(UInt8 cid, const char *what);
+
+    void delayedPublishingNubs(IOTimerEventSource *sender);
+
+    void gpioWakeUp(IOInterruptEventSource *sender, int count);
+
     IOReturn getDeviceResources();
-    
+
+    void detectFeatures();
+
     VoodooUARTController* getUARTController();
-    
-    VoodooGPIO* getGPIOController();
-    
-    IOReturn flushCacheGated();
-    
+
+    IOReturn flushGated();
+
     void releaseResources();
 };
 

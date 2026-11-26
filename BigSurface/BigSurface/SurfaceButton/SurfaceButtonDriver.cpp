@@ -12,16 +12,10 @@
 OSDefineMetaClassAndStructors(SurfaceButtonDriver, IOService)
 
 VoodooGPIO* SurfaceButtonDriver::getGPIOController() {
-    VoodooGPIO* gpio_controller = NULL;
-
     // Wait for GPIO controller, up to 1 second
-    OSDictionary* name_match = serviceMatching("VoodooGPIO");
-    IOService* matched = waitForMatchingService(name_match, 1000000000);
-    gpio_controller = OSDynamicCast(VoodooGPIO, matched);
+    VoodooGPIO* gpio_controller = VoodooGPIO::waitForController(1000000000);
     if (gpio_controller != NULL)
         DBG_LOG("Got GPIO Controller! %s", gpio_controller->getName());
-    OSSafeReleaseNULL(name_match);
-    OSSafeReleaseNULL(matched);
 
     return gpio_controller;
 }

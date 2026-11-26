@@ -34,7 +34,9 @@ bool SurfaceHIDNub::start(IOService *provider) {
         return false;
     
     SurfaceHIDDescriptor desc;
-    if (getHIDDescriptor(SurfaceLegacyKeyboardDevice, &desc) != kIOReturnSuccess) {
+    // Only the Surface Laptop 1/2 have the legacy keyboard, do not wait for it on other known models
+    legacy = ssh->hasFeature(SurfaceSAMFeatureLegacyKeyboard) || !ssh->isKnownModel();
+    if (!legacy || getHIDDescriptor(SurfaceLegacyKeyboardDevice, &desc) != kIOReturnSuccess) {
         legacy = false;
         if (getHIDDescriptor(SurfaceKeyboardDevice, &desc) != kIOReturnSuccess)
             return false;

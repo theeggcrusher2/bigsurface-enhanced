@@ -68,16 +68,21 @@
 #define SSH_CID_BAT_STA             0x01
 #define SSH_CID_BAT_BIX             0x02
 #define SSH_CID_BAT_BST             0x03
+#define SSH_CID_BAT_BTP             0x04    /* set battery trip point (_BTP) */
 #define SSH_CID_BAT_PMAX            0x0B
 #define SSH_CID_BAT_PSOC            0x0C
 #define SSH_CID_BAT_PSR             0x0D
 #define SSH_EVENT_CID_BAT_BIX       0x15
 #define SSH_EVENT_CID_BAT_BST       0x16
 #define SSH_EVENT_CID_BAT_PSR       0x17
+#define SSH_EVENT_CID_BAT_PROT      0x18    /* battery protection status changed */
+#define SSH_EVENT_CID_BAT_DPTF      0x53
 /* TC=0x03 */
 #define SSH_CID_TMP_SENSOR          0x01
 #define SSH_CID_TMP_GET_PERF        0x02
 #define SSH_CID_TMP_SET_PERF        0x03
+#define SSH_CID_TMP_GET_SENSORS     0x04    /* bitmask of available sensors (Laptop 5+, Pro 9+) */
+#define SSH_CID_TMP_GET_NAME        0x0E    /* sensor name, iid = sensor */
 #define SSH_TEMP_SENSOR_MB1         0x01
 #define SSH_TEMP_SENSOR_MB2         0x02
 #define SSH_TEMP_SENSOR_MB3         0x03
@@ -86,6 +91,9 @@
 #define SSH_TEMP_SENSOR_GPU         0x06
 #define SSH_TEMP_SENSOR_SSD         0x07
 #define SSH_TEMP_SENSOR_SOC         0x08
+/* TC=0x05 */
+#define SSH_CID_FAN_GET_RPM         0x01
+#define SSH_CID_FAN_SET_PROFILE     0x0E
 /* TC=0x08 */
 #define SSH_CID_KBD_GET_DESCRIPTOR      0x00
 #define SSH_CID_KBD_SET_CAPS_LED        0x01
