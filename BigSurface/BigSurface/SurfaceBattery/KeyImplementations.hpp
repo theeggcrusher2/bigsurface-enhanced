@@ -50,6 +50,8 @@ class CHLC : public BatKey { protected: SMC_RESULT readAccess() override; };
 
 class BC1V : public BatIdxKey { using BatIdxKey::BatIdxKey; protected: SMC_RESULT readAccess() override; };
 
+class F0Ac : public BatKey { protected: SMC_RESULT readAccess() override; };
+
 //TODO: implement these
 // class D0IR : public BatKey { using BatKey::BatKey; protected: SMC_RESULT readAccess() override; };
 // class D0VM : public BatKey { using BatKey::BatKey; protected: SMC_RESULT readAccess() override; };

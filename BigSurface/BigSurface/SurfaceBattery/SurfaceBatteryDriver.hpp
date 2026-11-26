@@ -15,6 +15,9 @@
 #define BST_UPDATE_NORMAL   30000
 #define BST_UPDATE_QUICK_CNT    5
 
+#define THERMAL_UPDATE_INTERVAL     3000    // fan speed refresh, ms
+#define THERMAL_SENSOR_UPDATE_TICKS 10      // thermal sensors are refreshed every 10th fan refresh
+
 class EXPORT SurfaceBatteryDriver : public IOService {
 	OSDeclareDefaultStructors(SurfaceBatteryDriver)
 
@@ -60,6 +63,10 @@ class EXPORT SurfaceBatteryDriver : public IOService {
 
 	// Keys used in BigSur 10.16 and later
 	static constexpr SMC_KEY KeyBC1V(size_t i) { return SMC_MAKE_IDENTIFIER('B','C',KeyIndexes[i],'V'); }
+
+	// Fan keys, only on models with a SAM controlled fan (Surface Laptop 5/6, Pro 9 and later)
+	static constexpr SMC_KEY KeyFNum = SMC_MAKE_IDENTIFIER('F','N','u','m');
+	static constexpr SMC_KEY KeyF0Ac(size_t i) { return SMC_MAKE_IDENTIFIER('F',KeyIndexes[i],'A','c'); }
 	
 	/**
 	 *  VirtualSMC service registration notifier
@@ -84,12 +91,16 @@ public:
     IOReturn setProperties(OSObject* props) override;
 	
 	static bool vsmcNotificationHandler(void *sensors, void *refCon, IOService *vsmc, IONotifier *notifier);
+
+    /* Last fan speed read from SAM, served by the F0Ac SMC key */
+    static volatile UInt16 fan_rpm;
     
 private:
     IOWorkLoop*             work_loop {nullptr};
     IOTimerEventSource*     timer {nullptr};
     IOInterruptEventSource* update_bix {nullptr};
     IOInterruptEventSource* update_bst {nullptr};
+    IOTimerEventSource*     thermal_timer {nullptr};
     SurfaceBatteryNub*      nub {nullptr};
     
     bool    awake {false};
@@ -98,6 +109,8 @@ private:
     int     quick_cnt {0};
     bool    bat_missing {false};
     bool    sync {false};
+    bool    trip_point_set {false};
+    UInt32  thermal_ticks {0};
     AbsoluteTime last_update {0};
 
     void eventReceived(SurfaceBatteryNub *sender, SurfaceBatteryEventType type);
@@ -107,6 +120,14 @@ private:
     void updateBatteryStatus(IOInterruptEventSource *sender, int count);
     
     void pollBatteryStatus(IOTimerEventSource* sender);
+
+    void pollThermalStatus(IOTimerEventSource* sender);
+
+    void updateThermalSensors();
+
+    void applyPerformanceMode();
+
+    void reportFakeBattery();
     
     void releaseResources();
 };

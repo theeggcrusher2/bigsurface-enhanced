@@ -244,3 +244,8 @@ SMC_RESULT BC1V::readAccess() {
     IOSimpleLockUnlock(BatteryManager::getShared()->stateLock);
     return SmcSuccess;
 }
+
+SMC_RESULT F0Ac::readAccess() {
+	*reinterpret_cast<UInt16 *>(data) = VirtualSMCAPI::encodeIntFp(SmcKeyTypeFpe2, SurfaceBatteryDriver::fan_rpm);
+	return SmcSuccess;
+}

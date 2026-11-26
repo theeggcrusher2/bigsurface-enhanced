@@ -5,11 +5,29 @@
 //  Created by Xavier on 2022/5/19.
 //  Copyright © 2022 Xia Shangning. All rights reserved.
 //
+//  SAM requests follow Linux drivers/power/supply/surface_battery.c, surface_charger.c,
+//  drivers/platform/surface/surface_platform_profile.c and drivers/hwmon/surface_{fan,temp}.c
+//
 
 #include "SurfaceBatteryNub.hpp"
 
 #define super SurfaceSerialHubClient
 OSDefineMetaClassAndStructors(SurfaceBatteryNub, SurfaceSerialHubClient)
+
+/* Thermal sensor name response, see Linux surface_temp.c */
+struct PACKED SurfaceTemperatureSensorName {
+    UInt16 unknown1;
+    char   unknown2;
+    char   name[SURFACE_TEMP_SENSOR_NAME_LEN];
+};
+static_assert(sizeof(SurfaceTemperatureSensorName) == 21, "Invalid sensor name response size");
+
+/* Platform profile response, see Linux surface_platform_profile.c */
+struct PACKED SurfacePerformanceModeInfo {
+    UInt32 profile;
+    UInt16 unknown1;
+    UInt16 unknown2;
+};
 
 bool SurfaceBatteryNub::attach(IOService* provider) {
     if (!super::attach(provider))
@@ -30,17 +48,22 @@ void SurfaceBatteryNub::detach(IOService* provider) {
 bool SurfaceBatteryNub::start(IOService *provider) {
     if (!super::start(provider))
         return false;
-    
+
+    memset(temp_sensor_names, 0, sizeof(temp_sensor_names));
+    probeTemperatureSensors();
+    setProperty("Fan", hasFan());
+
     PMinit();
     ssh->joinPMtree(this);
     registerPowerDriver(this, myIOPMPowerStates, kIOPMNumberPowerStates);
-    
+
     registerService();
     return true;
 }
 
 void SurfaceBatteryNub::stop(IOService *provider) {
     unregisterBatteryEvent(target);
+    PMstop();
     super::stop(provider);
 }
 
@@ -57,14 +80,18 @@ IOReturn SurfaceBatteryNub::registerBatteryEvent(OSObject* owner, EventHandler _
         LOG("Battery event already registered for a handler!");
         return kIOReturnNoResources;
     }
-    
-    IOReturn ret = ssh->registerEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_BAT, 0x00);
-    if (ret != kIOReturnSuccess)
-        return ret;
-    
+
+    // Set before enabling the events, an event may arrive right away
     target = owner;
     handler = _handler;
-    return kIOReturnSuccess;
+
+    // SAM expects battery events to be enabled for instance 0, see Linux spwr_battery_init()
+    IOReturn ret = ssh->registerEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_BAT, 0x00);
+    if (ret != kIOReturnSuccess) {
+        target = nullptr;
+        handler = nullptr;
+    }
+    return ret;
 }
 
 void SurfaceBatteryNub::unregisterBatteryEvent(OSObject* owner) {
@@ -91,6 +118,11 @@ void SurfaceBatteryNub::eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid,
         case SSH_EVENT_CID_BAT_PSR:
             type = SurfaceAdaptorStatusChanged;
             break;
+        case SSH_EVENT_CID_BAT_PROT:
+        case SSH_EVENT_CID_BAT_DPTF:
+            // Battery protection and DPTF notifications, not handled (same as Linux)
+            DBG_LOG("Ignoring battery event cid %x, iid %d", cid, iid);
+            return;
         default:
             DBG_LOG("Unknown battery event! tid: %d, iid: %d, cid: %x, data_len: %d", tid, iid, cid, length);
             return;
@@ -101,68 +133,105 @@ void SurfaceBatteryNub::eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid,
 
 IOReturn SurfaceBatteryNub::getBatteryConnection(UInt8 index, bool *connected) {
     UInt32 sta = 0x00;
-    if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_STA, nullptr, 0, true, reinterpret_cast<UInt8 *>(&sta), 4) != kIOReturnSuccess)
+    if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_STA, nullptr, 0, true, reinterpret_cast<UInt8 *>(&sta), sizeof(sta)) != kIOReturnSuccess)
         return kIOReturnError;
 
     *connected = (sta & 0x10) ? true : false;
-    
+
     return kIOReturnSuccess;
+}
+
+IOReturn SurfaceBatteryNub::getBatteryInformation(UInt8 index, SurfaceBatteryBIX *bix) {
+    UInt16 received = 0;
+    memset(bix, 0, sizeof(SurfaceBatteryBIX));
+    if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_BIX, nullptr, 0, true, reinterpret_cast<UInt8 *>(bix), sizeof(SurfaceBatteryBIX), &received) != kIOReturnSuccess)
+        return kIOReturnError;
+    if (received < offsetof(SurfaceBatteryBIX, model)) {
+        LOG("BIX response too short (%d bytes)", received);
+        return kIOReturnUnderrun;
+    }
+
+    // Enforce NUL terminated strings in case anything goes wrong
+    bix->model[sizeof(bix->model) - 1] = '\0';
+    bix->serial[sizeof(bix->serial) - 1] = '\0';
+    bix->type[sizeof(bix->type) - 1] = '\0';
+    bix->oem_info[sizeof(bix->oem_info) - 1] = '\0';
+
+    if (bix->revision != 0)
+        LOG("Unsupported battery BIX revision: %u", bix->revision);
+    return kIOReturnSuccess;
+}
+
+OSArray *SurfaceBatteryNub::createBIXArray(const SurfaceBatteryBIX *bix) {
+    const OSObject *arr[] = {
+        OSNumber::withNumber(bix->revision, 8),
+        OSNumber::withNumber(bix->power_unit, 32),
+        OSNumber::withNumber(bix->design_cap, 32),
+        OSNumber::withNumber(bix->last_full_charge_cap, 32),
+        OSNumber::withNumber(bix->technology, 32),
+        OSNumber::withNumber(bix->design_voltage, 32),
+        OSNumber::withNumber(bix->design_cap_warn, 32),
+        OSNumber::withNumber(bix->design_cap_low, 32),
+        OSNumber::withNumber(bix->cycle_count, 32),
+        OSNumber::withNumber(bix->measurement_accuracy, 32),
+        OSNumber::withNumber(bix->max_sampling_time, 32),
+        OSNumber::withNumber(bix->min_sampling_time, 32),
+        OSNumber::withNumber(bix->max_avg_interval, 32),
+        OSNumber::withNumber(bix->min_avg_interval, 32),
+        OSNumber::withNumber(bix->bat_cap_granularity_1, 32),
+        OSNumber::withNumber(bix->bat_cap_granularity_2, 32),
+        OSString::withCString(bix->model),
+        OSString::withCString(bix->serial),
+        OSString::withCString(bix->type),
+        OSString::withCString(bix->oem_info),
+    };
+    const unsigned int count = sizeof(arr) / sizeof(arr[0]);
+
+    OSArray *array = nullptr;
+    bool complete = true;
+    for (unsigned int i = 0; i < count; i++)
+        complete &= arr[i] != nullptr;
+    if (complete)
+        array = OSArray::withObjects(arr, count);
+
+    // The array holds its own references
+    for (unsigned int i = 0; i < count; i++) {
+        if (arr[i])
+            arr[i]->release();
+    }
+    return array;
 }
 
 IOReturn SurfaceBatteryNub::getBatteryInformation(UInt8 index, OSArray **bix) {
-    UInt8 buffer[BIX_LENGTH];
-    if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_BIX, nullptr, 0, true, buffer, BIX_LENGTH) != kIOReturnSuccess)
-        return kIOReturnError;
-    
-    UInt32 *temp = reinterpret_cast<UInt32 *>(buffer+1);
-    const char *str = reinterpret_cast<const char *>(buffer);
-    
-    OSNumber *revision = OSNumber::withNumber(*buffer, 8);
-    OSNumber *power_unit = OSNumber::withNumber(temp[0], 32);
-    OSNumber *design_cap = OSNumber::withNumber(temp[1], 32);
-    OSNumber *last_full_cap = OSNumber::withNumber(temp[2], 32);
-    OSNumber *bat_tech = OSNumber::withNumber(temp[3], 32);
-    OSNumber *design_volt = OSNumber::withNumber(temp[4], 32);
-    OSNumber *design_cap_warn = OSNumber::withNumber(temp[5], 32);
-    OSNumber *design_cap_low = OSNumber::withNumber(temp[6], 32);
-    OSNumber *cycle_cnt = OSNumber::withNumber(temp[7], 32);
-    OSNumber *mesure_acc = OSNumber::withNumber(temp[8], 32);
-    OSNumber *max_sample_t = OSNumber::withNumber(temp[9], 32);
-    OSNumber *min_sample_t = OSNumber::withNumber(temp[10], 32);
-    OSNumber *max_avg_interval = OSNumber::withNumber(temp[11], 32);
-    OSNumber *min_avg_interval = OSNumber::withNumber(temp[12], 32);
-    OSNumber *bat_cap_gra_1 = OSNumber::withNumber(temp[13], 32);
-    OSNumber *bat_cap_gra_2 = OSNumber::withNumber(temp[14], 32);
-    OSString *model_number = OSString::withCString(str+0x3D);
-    OSString *serial_number = OSString::withCString(str+0x52);
-    OSString *bat_type = OSString::withCString(str+0x5D);
-    OSString *oem_info = OSString::withCString(str+0x62);
-    
-    const OSObject *arr[] = {revision, power_unit, design_cap, last_full_cap, bat_tech,
-                        design_volt, design_cap_warn, design_cap_low, cycle_cnt,
-                        mesure_acc, max_sample_t, min_sample_t, max_avg_interval,
-                        min_avg_interval, bat_cap_gra_1, bat_cap_gra_2, model_number,
-                        serial_number, bat_type, oem_info};
-    *bix = OSArray::withObjects(arr, 20);
+    SurfaceBatteryBIX raw;
+    IOReturn ret = getBatteryInformation(index, &raw);
+    if (ret != kIOReturnSuccess)
+        return ret;
+
+    *bix = createBIXArray(&raw);
     if (!(*bix)) {
-        LOG("Could not create a 20 sized array!");
-        for (int i=0; i<20; i++)
-            OSSafeReleaseNULL(arr[i]);
-        return kIOReturnError;
+        LOG("Could not create the BIX array!");
+        return kIOReturnNoMemory;
     }
-    
     return kIOReturnSuccess;
 }
-
 
 IOReturn SurfaceBatteryNub::getBatteryStatus(UInt8 index, UInt32 *bst, UInt16 *temp) {
     if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_BST, nullptr, 0, true, reinterpret_cast<UInt8 *>(bst), BST_LENGTH) != kIOReturnSuccess)
         return kIOReturnError;
-    
-    
-    if (ssh->getResponse(SSH_TC_TMP, SSH_TID_PRIMARY, SSH_TEMP_SENSOR_BAT, SSH_CID_TMP_SENSOR, nullptr, 0, true, reinterpret_cast<UInt8 *>(temp), 2) != kIOReturnSuccess)
-        LOG("Failed to get battery temperature!");
-    
+
+    // Skip the battery sensor if enumeration says it does not exist on this model
+    if (temp_sensors && !(temp_sensors & BIT(SSH_TEMP_SENSOR_BAT - 1)))
+        return kIOReturnSuccess;
+    if (getTemperature(SSH_TEMP_SENSOR_BAT, temp) != kIOReturnSuccess)
+        DBG_LOG("Failed to get battery temperature!");
+
+    return kIOReturnSuccess;
+}
+
+IOReturn SurfaceBatteryNub::setBatteryTripPoint(UInt8 index, UInt32 capacity) {
+    if (!ssh->sendCommand(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_BTP, reinterpret_cast<UInt8 *>(&capacity), sizeof(capacity), true))
+        return kIOReturnError;
     return kIOReturnSuccess;
 }
 
@@ -170,9 +239,106 @@ IOReturn SurfaceBatteryNub::getAdaptorStatus(UInt32 *psr) {
     return ssh->getResponse(SSH_TC_BAT, SSH_TID_PRIMARY, 0x01, SSH_CID_BAT_PSR, nullptr, 0, true, reinterpret_cast<UInt8 *>(psr), 4);
 }
 
+IOReturn SurfaceBatteryNub::getPerformanceMode(UInt32 *mode) {
+    SurfacePerformanceModeInfo info = {};
+    UInt16 received = 0;
+    IOReturn ret = ssh->getResponse(SSH_TC_TMP, SSH_TID_PRIMARY, 0, SSH_CID_TMP_GET_PERF, nullptr, 0, true, reinterpret_cast<UInt8 *>(&info), sizeof(info), &received);
+    if (ret != kIOReturnSuccess)
+        return ret;
+    if (received < sizeof(info.profile))
+        return kIOReturnUnderrun;
+    *mode = info.profile;
+    return kIOReturnSuccess;
+}
+
 IOReturn SurfaceBatteryNub::setPerformanceMode(UInt32 mode) {
-    if (!ssh->sendCommand(SSH_TC_TMP, SSH_TID_PRIMARY, 0, SSH_CID_TMP_SET_PERF, reinterpret_cast<UInt8 *>(&mode), 4, true))
+    UInt8 fan_profile;
+    switch (mode) {
+        // The fan profile ids do not match the platform profile ids (Linux ssam_fan_profile)
+        case SurfacePerformanceModeRecommended:         fan_profile = 2; break;
+        case SurfacePerformanceModeBatterySaver:        fan_profile = 1; break;
+        case SurfacePerformanceModeBetterPerformance:   fan_profile = 3; break;
+        case SurfacePerformanceModeBestPerformance:     fan_profile = 4; break;
+        default:
+            LOG("Invalid performance mode %u", mode);
+            return kIOReturnBadArgument;
+    }
+
+    if (!ssh->sendCommand(SSH_TC_TMP, SSH_TID_PRIMARY, 0, SSH_CID_TMP_SET_PERF, reinterpret_cast<UInt8 *>(&mode), sizeof(mode), true))
         return kIOReturnError;
-    else
-        return kIOReturnSuccess;
+
+    if (ssh->hasFeature(SurfaceSAMFeatureFanProfile) &&
+        !ssh->sendCommand(SSH_TC_FAN, SSH_TID_PRIMARY, 0x01, SSH_CID_FAN_SET_PROFILE, &fan_profile, sizeof(fan_profile), true))
+        return kIOReturnError;
+
+    return kIOReturnSuccess;
+}
+
+IOReturn SurfaceBatteryNub::getFanSpeed(UInt16 *rpm) {
+    if (!hasFan())
+        return kIOReturnUnsupported;
+    UInt16 received = 0;
+    IOReturn ret = ssh->getResponse(SSH_TC_FAN, SSH_TID_PRIMARY, 0x01, SSH_CID_FAN_GET_RPM, nullptr, 0, true, reinterpret_cast<UInt8 *>(rpm), sizeof(UInt16), &received);
+    if (ret == kIOReturnSuccess && received < sizeof(UInt16))
+        ret = kIOReturnUnderrun;
+    return ret;
+}
+
+IOReturn SurfaceBatteryNub::getTemperature(UInt8 sensor, UInt16 *temp) {
+    UInt16 value = 0, received = 0;
+    IOReturn ret = ssh->getResponse(SSH_TC_TMP, SSH_TID_PRIMARY, sensor, SSH_CID_TMP_SENSOR, nullptr, 0, true, reinterpret_cast<UInt8 *>(&value), sizeof(value), &received);
+    if (ret != kIOReturnSuccess)
+        return ret;
+    if (received < sizeof(value))
+        return kIOReturnUnderrun;
+    *temp = value;
+    return kIOReturnSuccess;
+}
+
+const char *SurfaceBatteryNub::getTemperatureSensorName(UInt8 sensor) const {
+    if (sensor < 1 || sensor > SURFACE_TEMP_SENSOR_MAX || !(temp_sensors & BIT(sensor - 1)))
+        return nullptr;
+    return temp_sensor_names[sensor - 1];
+}
+
+void SurfaceBatteryNub::probeTemperatureSensors() {
+    temp_sensors = 0;
+    if (!ssh->hasFeature(SurfaceSAMFeatureThermalSensors))
+        return;
+
+    UInt16 sensors = 0, received = 0;
+    if (ssh->getResponse(SSH_TC_TMP, SSH_TID_PRIMARY, 0, SSH_CID_TMP_GET_SENSORS, nullptr, 0, true, reinterpret_cast<UInt8 *>(&sensors), sizeof(sensors), &received) != kIOReturnSuccess || received < sizeof(sensors)) {
+        LOG("Failed to enumerate thermal sensors");
+        return;
+    }
+
+    OSDictionary *names = OSDictionary::withCapacity(SURFACE_TEMP_SENSOR_MAX);
+    for (int i = 0; i < SURFACE_TEMP_SENSOR_MAX; i++) {
+        if (!(sensors & BIT(i)))
+            continue;
+        SurfaceTemperatureSensorName rsp = {};
+        if (ssh->getResponse(SSH_TC_TMP, SSH_TID_PRIMARY, i + 1, SSH_CID_TMP_GET_NAME, nullptr, 0, true, reinterpret_cast<UInt8 *>(&rsp), sizeof(rsp)) != kIOReturnSuccess) {
+            LOG("Failed to get name of thermal sensor %d", i + 1);
+            sensors &= ~BIT(i);
+            continue;
+        }
+        strlcpy(temp_sensor_names[i], rsp.name, SURFACE_TEMP_SENSOR_NAME_LEN);
+        if (!temp_sensor_names[i][0])
+            snprintf(temp_sensor_names[i], SURFACE_TEMP_SENSOR_NAME_LEN, "Sensor %d", i + 1);
+        if (names) {
+            char key[8];
+            snprintf(key, sizeof(key), "%d", i + 1);
+            OSString *name = OSString::withCString(temp_sensor_names[i]);
+            if (name) {
+                names->setObject(key, name);
+                name->release();
+            }
+        }
+    }
+    temp_sensors = sensors;
+    LOG("Thermal sensors: 0x%04x", temp_sensors);
+    if (names) {
+        setProperty("Thermal Sensors", names);
+        names->release();
+    }
 }
