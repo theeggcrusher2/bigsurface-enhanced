@@ -11,7 +11,7 @@
 
 #include "VoodooI2CController.hpp"
 
-/* Implements a PCI Intel LPSS Designware I2C Controller
+/* Implements a PCI Intel LPSS Synopsys DesignWare I2C Controller
  *
  * The members of this class are responsible for low-level interfacing with the physical PCI hardware.
  */
@@ -31,7 +31,7 @@ class EXPORT VoodooI2CPCIController : public VoodooI2CController {
  private:
     /* Finds the ACPI device associated to the PCI provider
      *
-     * Despite a controller being PCI enumerated, some PCs will sill provide bus configuration values (used in 
+     * Despite a controller being PCI enumerated, some PCs will sill provide bus configuration values (used in
      * <VoodooI2CControllerDriver::getBusConfig>) in the ACPI tables in an ACPI device associated to the controller.
      * This function traverses the IORegistry plane to seek out such an ACPI device.
      *
@@ -42,7 +42,7 @@ class EXPORT VoodooI2CPCIController : public VoodooI2CController {
 
     /* @inherit */
 
-    IOReturn setPowerState(unsigned long whichState, IOService * whatDevice) override;
+    IOReturn setPowerState(unsigned long whichState, IOService * whatDevice);
 
     /* Skylake LPSS Reset Hack
      *
@@ -54,11 +54,11 @@ class EXPORT VoodooI2CPCIController : public VoodooI2CController {
 
     /* @inherit */
 
-    bool start(IOService* provider) override;
+    bool start(IOService* provider);
 
     /* @inherit */
 
-    void stop(IOService* provider) override;
+    void stop(IOService* provider);
 };
 
 #endif /* VoodooI2CPCIController_hpp */

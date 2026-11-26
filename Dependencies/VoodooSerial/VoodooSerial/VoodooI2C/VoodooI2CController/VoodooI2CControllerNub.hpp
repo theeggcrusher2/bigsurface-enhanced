@@ -9,14 +9,23 @@
 #ifndef VoodooI2CControllerNub_hpp
 #define VoodooI2CControllerNub_hpp
 
-#include "../../helpers.hpp"
+#include <IOKit/IOLib.h>
+#include <IOKit/IOService.h>
+#include <IOKit/IOKitKeys.h>
+#include <IOKit/IOWorkLoop.h>
+#include <IOKit/IOInterruptEventSource.h>
+#include <IOKit/IOCommandGate.h>
+
+#ifndef EXPORT
+#define EXPORT __attribute__((visibility("default")))
+#endif
 
 class VoodooI2CController;
 
 /* Implements a controller nub to which an instance of <VoodooI2CControllerDriver> may attach
  *
  * The members of this class are responsible for acting as a middle-man between the physical 
- * device and the I2C bus iself.
+ * device and the I2C bus itself.
  */
 class EXPORT VoodooI2CControllerNub : public IOService {
     OSDeclareDefaultStructors(VoodooI2CControllerNub);
@@ -31,7 +40,7 @@ class EXPORT VoodooI2CControllerNub : public IOService {
      * This function attaches the nub to the physical controller so that it appears as a child entry
      * in the IOService plane.
      *
-     * @return *true* on succesful attach, *false* otherwise
+     * @return *true* on successful attach, *false* otherwise
      */
 
     bool attach(IOService* provider) override;
@@ -107,6 +116,17 @@ class EXPORT VoodooI2CControllerNub : public IOService {
     IOReturn unregisterInterrupt(int source) override;
 
  private:
+    /* Handles an interrupt when the controller asserts its interrupt line
+     * @owner    The owner of this interrupt
+     * @src      The interrupt event source
+     * @intCount   The index of the interrupt in the provider
+     *
+     * This function is called by the operating system when the controller asserts its interrupt line. 
+     * It's only purpose is to delegate the interrupt to the attached driver.
+     */
+
+    void interruptOccured(OSObject* owner, IOInterruptEventSource* src, int intCount);
+
     /* Releases resources allocated in <start>
      *
      * This function is called during a graceful exit from <start> and during

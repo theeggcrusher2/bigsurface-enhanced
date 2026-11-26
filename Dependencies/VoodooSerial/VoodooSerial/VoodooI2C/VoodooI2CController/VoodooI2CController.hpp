@@ -8,6 +8,8 @@
 #ifndef VoodooI2CController_hpp
 #define VoodooI2CController_hpp
 
+#include <IOKit/IOLib.h>
+#include <IOKit/IOKitKeys.h>
 #include <IOKit/acpi/IOACPIPlatformDevice.h>
 #include <IOKit/pci/IOPCIDevice.h>
 
@@ -17,23 +19,23 @@
 #define kACPIDevicePathKey "acpi-path"
 #endif
 
-typedef struct _VoodooI2CControllerPhysicalDevice {
+struct VoodooI2CControllerPhysicalDevice {
     IOACPIPlatformDevice* acpi_device;
     bool awake = true;
     const char* name;
     IOPCIDevice* pci_device;
     IOMemoryMap* mmap;
     IOService* provider;
-} VoodooI2CControllerPhysicalDevice;
+};
 
 class VoodooI2CControllerNub;
 
-/* Implements an Intel LPSS Designware I2C Controller
+/* Implements a Synopsys DesignWare I2C Controller
  *
  * This is the base class from which all implementations of a physical
- * Intel LPSS Designware I2C Controller should inherit from. The members of this class
+ * Synopsys DesignWare I2C Controller should inherit from. The members of this class
  * are responsible for low-level interfacing with the physical hardware. For the driver implementing
- * the properiety Designware I2C controller interface, see <VoodooI2CControllerDriver>.
+ * the proprietary Synopsys DesignWare I2C controller interface, see <VoodooI2CControllerDriver>.
  */
 class EXPORT VoodooI2CController : public IOService {
   OSDeclareDefaultStructors(VoodooI2CController);
@@ -160,7 +162,7 @@ class EXPORT VoodooI2CController : public IOService {
      * This function is called by the operating system's power management services
      * to instruct the controller to enter a certain power state.
      *
-     * @return *kIOPMAckImplied* on succesful state change, *kIOReturnError* otherwise
+     * @return *kIOPMAckImplied* on successful state change, *kIOReturnError* otherwise
      */
 
     IOReturn setPowerState(unsigned long whichState, IOService* whatDevice) override;

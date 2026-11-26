@@ -31,50 +31,304 @@
 			<key>IOProviderClass</key>
 			<string>VoodooI2CControllerNub</string>
 		</dict>
-		<key>VoodooI2CPCIController</key>
+		<key>VoodooI2CPCIAlderLakeController</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>133000000</integer>
+			<key>I2CSclFallingTimeNs</key>
+			<integer>208</integer>
+			<key>I2CSdaFallingTimeNs</key>
+			<integer>171</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>42</integer>
 			<key>IOClass</key>
 			<string>VoodooI2CPCIController</string>
 			<key>IOPCIMatch</key>
-			<string>0x9d608086&amp;0xFFFCFFFF 0xa1608086&amp;0xFFFCFFFF 0x9de88086&amp;0xFFFCFFFF 0xa3688086&amp;0xFFFCFFFF</string>
+			<string>0x51e88086&amp;0xFFFCFFFF 0x51c58086 0x51c68086 0x51d88086 0x51d98086 0x54e88086&amp;0xFFFCFFFF 0x54c58086 0x54c68086 0x7acc8086&amp;0xFFFCFFFF 0x7afc8086 0x7afd8086</string>
 			<key>IOProbeScore</key>
 			<integer>9999</integer>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 		</dict>
-		<key>VoodooI2CPCILakeController</key>
+		<key>VoodooI2CPCICannonLakeController</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>216000000</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>230</integer>
 			<key>IOClass</key>
-			<string>VoodooI2CPCILakeController</string>
+			<string>VoodooI2CPCIController</string>
 			<key>IOPCIMatch</key>
-			<string>0x06e88086&amp;0xFFFCFFFF 0x02e88086&amp;0xFFFCFFFF 0x34e88086&amp;0xFFFCFFFF 0x34c58086&amp;0xFFFCFFFF</string>
+			<string>0x9de88086&amp;0xFFFCFFFF 0x9dc58086 0x9dc68086 0xa3688086&amp;0xFFFCFFFF</string>
 			<key>IOProbeScore</key>
 			<integer>9999</integer>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 		</dict>
-		<key>VoodooUARTController</key>
+		<key>VoodooI2CPCICometLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>216000000</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>230</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x02e88086&amp;0xFFFCFFFF 0x02c58086 0x02c68086 0x06e88086&amp;0xFFFCFFFF</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCIIceLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>133000000</integer>
+			<key>I2CSclFallingTimeNs</key>
+			<integer>208</integer>
+			<key>I2CSdaFallingTimeNs</key>
+			<integer>171</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>42</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x34e88086&amp;0xFFFCFFFF 0x34c58086 0x34c68086</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCIMeteorLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>133000000</integer>
+			<key>I2CSclFallingTimeNs</key>
+			<integer>208</integer>
+			<key>I2CSdaFallingTimeNs</key>
+			<integer>171</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>42</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x7e788086&amp;0xFFFCFFFF 0x7e508086 0x7e518086</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCIRaptorLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>133000000</integer>
+			<key>I2CSclFallingTimeNs</key>
+			<integer>208</integer>
+			<key>I2CSdaFallingTimeNs</key>
+			<integer>171</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>42</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x7a4c8086&amp;0xFFFCFFFF 0x7a7c8086 0x7a7d8086</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCISunrisePointController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>120000000</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>230</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x9d608086&amp;0xFFFCFFFF 0x9d648086 0x9d658086 0xa1608086&amp;0xFFFCFFFF 0xa2e08086&amp;0xFFFCFFFF</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCITigerLakeHController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>133000000</integer>
+			<key>I2CSclFallingTimeNs</key>
+			<integer>208</integer>
+			<key>I2CSdaFallingTimeNs</key>
+			<integer>171</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>42</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0x43e88086&amp;0xFFFCFFFF 0x43ad8086 0x43ae8086 0x43d88086</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooI2CPCITigerLakeLPController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>I2CClkRate</key>
+			<integer>120000000</integer>
+			<key>I2CSdaHoldTimeNs</key>
+			<integer>230</integer>
+			<key>IOClass</key>
+			<string>VoodooI2CPCIController</string>
+			<key>IOPCIMatch</key>
+			<string>0xa0e88086&amp;0xFFFCFFFF 0xa0c58086 0xa0c68086 0xa0d88086 0xa0d98086</string>
+			<key>IOProbeScore</key>
+			<integer>9999</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+		</dict>
+		<key>VoodooUARTAlderLakeController</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>IOClass</key>
 			<string>VoodooUARTController</string>
 			<key>IOPCIMatch</key>
-			<string>0x34a88086 0x9d278086</string>
+			<string>0x51a88086 0x51a98086 0x51c78086 0x54a88086 0x54a98086 0x54c78086 0x7aa88086 0x7aa98086 0x7adc8086 0x7afe8086</string>
 			<key>IOProbeScore</key>
 			<integer>400</integer>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>100000000</integer>
+		</dict>
+		<key>VoodooUARTCannonLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x9da88086 0x9da98086 0x9dc78086 0xa3288086 0xa3298086 0xa3478086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>120000000</integer>
+		</dict>
+		<key>VoodooUARTCometLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x02a88086 0x02a98086 0x02c78086 0x06a88086 0x06a98086 0x06c78086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>120000000</integer>
+		</dict>
+		<key>VoodooUARTIceLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x34a88086 0x34a98086 0x34c78086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>120000000</integer>
+		</dict>
+		<key>VoodooUARTMeteorLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x7e258086 0x7e268086 0x7e528086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>100000000</integer>
+		</dict>
+		<key>VoodooUARTRaptorLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x7a288086 0x7a298086 0x7a5c8086 0x7a7e8086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>100000000</integer>
+		</dict>
+		<key>VoodooUARTSunrisePointController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0x9d278086 0x9d288086 0x9d668086 0xa1278086 0xa1288086 0xa1668086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>120000000</integer>
+		</dict>
+		<key>VoodooUARTTigerLakeController</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooUARTController</string>
+			<key>IOPCIMatch</key>
+			<string>0xa0a88086 0xa0a98086 0xa0c78086 0xa0da8086 0xa0db8086 0xa0dc8086 0xa0dd8086 0x43a78086 0x43a88086 0x43a98086 0x43da8086</string>
+			<key>IOProbeScore</key>
+			<integer>400</integer>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>UARTClkRate</key>
+			<integer>100000000</integer>
 		</dict>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2021 Xia Shangning. All rights reserved.</string>
 	<key>OSBundleCompatibleVersion</key>
-	<string>1.0.0</string>
+	<string>1.3</string>
 	<key>OSBundleLibraries</key>
 	<dict>
 		<key>com.apple.iokit.IOACPIFamily</key>
@@ -90,7 +344,7 @@
 		<key>com.apple.kpi.mach</key>
 		<string>13.0</string>
 		<key>org.coolstar.VoodooGPIO</key>
-		<string>1.2</string>
+		<string>1.3</string>
 	</dict>
 	<key>OSBundleRequired</key>
 	<string>Root</string>

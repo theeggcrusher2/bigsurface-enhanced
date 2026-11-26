@@ -11,12 +11,23 @@
 
 // register length: 32 => 8*4 = 8<<2 = 8<<REG_SHIFT
 #define REG_SHIFT 2
-#define UART_CLOCK          64000000
 
+/*
+ * LPSS private clock register (PRV_CLOCK_PARAMS): a fractional divider
+ * (M at bits 15:1, N at bits 30:16) followed by an update gate at bit 31.
+ * Output clock = input clock * M / N. See Linux drivers/mfd/intel-lpss.c.
+ */
 #define LPSS_UART_CLK       0x00
 #define UART_ENABLE_CLK     0x01
 #define UART_UPDATE_CLK     BIT(31)
-#define CALC_CLK(M, N)      (((N)&0x7F)<<16|((M)&0x7F)<<1)
+#define UART_CLK_DIV_MAX    0x7FFF
+#define CALC_CLK(M, N)      ((((N)&UART_CLK_DIV_MAX)<<16)|(((M)&UART_CLK_DIV_MAX)<<1))
+
+/* Input clock of the LPSS UART block, see the IOKit personalities */
+#define UART_CLK_RATE_KEY       "UARTClkRate"
+#define UART_CLK_RATE_DEFAULT   120000000   /* Sunrise Point ~ Ice Lake */
+#define UART_DEFAULT_BAUDRATE   115200
+#define UART_DEFAULT_FIFO_SIZE  64
 
 /* Surface Pro 7 UART type 16550A specific register layout. See https://linux-sunxi.org/images/d/d2/Dw_apb_uart_db.pdf*/
 #define DW_UART_RX  0x0                     /* Receive buffer */
@@ -77,16 +88,16 @@
 #define UART_FCR_CLEAR_RX_FIFO  BIT(1)
 #define UART_FCR_CLEAR_TX_FIFO  BIT(2)
 
-#define UART_FCR_R_TRIG_ONE_CHAR    (0x00<<6) /* 1 char in FIFO*/
-#define UART_FCR_R_TRIG_QUARTER     (0x01<<6) /* FIFO 1/4 full*/
-#define UART_FCR_R_TRIG_HALF        (0x10<<6) /* FIFO 1/2 full*/
-#define UART_FCR_R_TRIG_TWO_LESS    (0x11<<6) /* FIFO 2 less than full*/
-#define UART_FCR_T_TRIG_EMPTY       (0x00<<4) /* FIFO empty*/
-#define UART_FCR_T_TRIG_TWO_CHAR    (0x01<<4) /* 2 char in FIFO*/
-#define UART_FCR_T_TRIG_QUARTER     (0x10<<4) /* FIFO 1/4 full*/
-#define UART_FCR_T_TRIG_HALF        (0x11<<4) /* FIFO 1/2 full*/
+#define UART_FCR_R_TRIG_ONE_CHAR    (0x0<<6) /* 1 char in FIFO*/
+#define UART_FCR_R_TRIG_QUARTER     (0x1<<6) /* FIFO 1/4 full*/
+#define UART_FCR_R_TRIG_HALF        (0x2<<6) /* FIFO 1/2 full*/
+#define UART_FCR_R_TRIG_TWO_LESS    (0x3<<6) /* FIFO 2 less than full*/
+#define UART_FCR_T_TRIG_EMPTY       (0x0<<4) /* FIFO empty*/
+#define UART_FCR_T_TRIG_TWO_CHAR    (0x1<<4) /* 2 char in FIFO*/
+#define UART_FCR_T_TRIG_QUARTER     (0x2<<4) /* FIFO 1/4 full*/
+#define UART_FCR_T_TRIG_HALF        (0x3<<4) /* FIFO 1/2 full*/
 
-/* FIFO Control Register bits */
+/* Modem Control Register bits */
 #define UART_MCR_AFC         BIT(5) /* Enable auto flow control mode */
 #define UART_MCR_LOOP        BIT(4) /* Enable loopback test mode */
 #define UART_MCR_OUT2        BIT(3) /* Out2 complement */
@@ -130,7 +141,7 @@
 #define UART_CPR_DMA_EXTRA              BIT(13)
 #define UART_CPR_FIFO_MODE              (0xff << 16)
 /* Helper for FIFO size calculation */
-#define DW_UART_CPR_FIFO_SIZE(a)    (((a >> 16) & 0xff) * 16)
+#define DW_UART_CPR_FIFO_SIZE(a)    ((((a) >> 16) & 0xff) * 16)
 
 /* UART Status Register bits */
 #define UART_USR_BUSY               BIT(0)

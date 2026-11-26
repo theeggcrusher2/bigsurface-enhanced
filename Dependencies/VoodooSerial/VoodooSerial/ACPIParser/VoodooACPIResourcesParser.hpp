@@ -7,6 +7,7 @@
 //
 
 #include <stdint.h>
+#include <libkern/OSTypes.h>
 
 #ifndef VoodooACPIResourcesParser_hpp
 #define VoodooACPIResourcesParser_hpp
@@ -102,12 +103,15 @@ public:
     uart_info uart_info;
     gpio_int_info gpio_interrupts;
     gpio_io_info gpio_io;
+
+    /* ResourceSource of the serial bus descriptor, i.e. the ACPI path of the bus controller */
+    char serial_bus_source[64];
     
     VoodooACPIResourcesParser();
     UInt32 parseACPIResources(UInt8 const* res, UInt32 offset, UInt32 sz);
 private:
-    void parseACPISerialBus(UInt8 const* res, UInt32 offset);
-    void parseACPIGPIO(UInt8 const* res, UInt32 offset);
+    void parseACPISerialBus(UInt8 const* res, UInt32 offset, UInt32 desc_len);
+    void parseACPIGPIO(UInt8 const* res, UInt32 offset, UInt32 desc_len);
 };
 
 #endif /* VoodooACPIResourcesParser_hpp */

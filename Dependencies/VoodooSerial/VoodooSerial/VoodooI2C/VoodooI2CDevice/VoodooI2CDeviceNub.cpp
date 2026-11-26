@@ -11,9 +11,9 @@
 
 #include <Availability.h>
 
-//#ifndef __ACIDANTHERA_MAC_SDK
-//#error "This kext SDK is unsupported. Download from https://github.com/acidanthera/MacKernelSDK"
-//#endif
+#ifndef __ACIDANTHERA_MAC_SDK
+#error "This kext SDK is unsupported. Download from https://github.com/acidanthera/MacKernelSDK"
+#endif
 
 #define super IOService
 OSDefineMetaClassAndStructors(VoodooI2CDeviceNub, IOService);
@@ -43,16 +43,23 @@ bool VoodooI2CDeviceNub::attach(IOService* provider, IOService* child) {
         return false;
     }
 
+    const char *interrupt_mode;
     if (has_gpio_interrupts) {
         gpio_controller = getGPIOController();
 
         if (!gpio_controller) {
-            IOLog("%s::%s Could not find GPIO controller, exiting", controller_name, child->getName());
+            IOLog("%s::%s Could not find GPIO controller, exiting\n", controller_name, child->getName());
             return false;
         }
         // Give the GPIO controller some time to load
-        IOSleep(100);
+        IOSleep(500);
+        interrupt_mode = "GPIO";
+    } else if (has_apic_interrupts) {
+        interrupt_mode = "APIC";
+    } else {
+        interrupt_mode = "Polling";
     }
+    setProperty("Interrupt Mode", interrupt_mode);
 
     setName(child->getName());
 
@@ -249,19 +256,12 @@ IOReturn VoodooI2CDeviceNub::getDeviceResources() {
 }
 
 VoodooGPIO* VoodooI2CDeviceNub::getGPIOController() {
-    VoodooGPIO* gpio_controller = NULL;
-
     // Wait for GPIO controller, up to 1 second
-    OSDictionary* name_match = IOService::serviceMatching("VoodooGPIO");
-
-    IOService* matched = waitForMatchingService(name_match, 1000000000);
-    gpio_controller = OSDynamicCast(VoodooGPIO, matched);
+    VoodooGPIO* gpio_controller = VoodooGPIO::waitForController(1000000000);
 
     if (gpio_controller != NULL) {
         IOLog("%s::%s Got GPIO Controller! %s\n", getName(), acpi_device->getName(), gpio_controller->getName());
     }
-    name_match->release();
-    OSSafeReleaseNULL(matched);
 
     return gpio_controller;
 }
