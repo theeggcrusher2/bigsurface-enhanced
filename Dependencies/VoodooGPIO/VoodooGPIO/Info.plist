@@ -20,6 +20,42 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>IOKitPersonalities</key>
 	<dict>
+		<key>VoodooGPIOAlderLakeN</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOAlderLakeN</string>
+			<key>IONameMatch</key>
+			<string>INTC1057</string>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOAlderLakeS</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOAlderLakeS</string>
+			<key>IONameMatch</key>
+			<array>
+				<string>INTC1056</string>
+				<string>INTC1085</string>
+			</array>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOCannonLakeH</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOCannonLakeH</string>
+			<key>IONameMatch</key>
+			<string>INT3450</string>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
 		<key>VoodooGPIOCannonLakeLP</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
@@ -27,9 +63,7 @@
 			<key>IOClass</key>
 			<string>VoodooGPIOCannonLakeLP</string>
 			<key>IONameMatch</key>
-			<array>
-				<string>INT34BB</string>
-			</array>
+			<string>INT34BB</string>
 			<key>IOProviderClass</key>
 			<string>IOService</string>
 		</dict>
@@ -40,9 +74,32 @@
 			<key>IOClass</key>
 			<string>VoodooGPIOIceLakeLP</string>
 			<key>IONameMatch</key>
+			<string>INT3455</string>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOMeteorLakeP</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOMeteorLakeP</string>
+			<key>IONameMatch</key>
 			<array>
-				<string>INT3455</string>
+				<string>INTC1083</string>
+				<string>INTC105E</string>
 			</array>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOSunrisePointH</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOSunrisePointH</string>
+			<key>IONameMatch</key>
+			<string>INT345D</string>
 			<key>IOProviderClass</key>
 			<string>IOService</string>
 		</dict>
@@ -53,8 +110,31 @@
 			<key>IOClass</key>
 			<string>VoodooGPIOSunrisePointLP</string>
 			<key>IONameMatch</key>
+			<string>INT344B</string>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOTigerLakeH</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOTigerLakeH</string>
+			<key>IONameMatch</key>
+			<string>INT34C6</string>
+			<key>IOProviderClass</key>
+			<string>IOService</string>
+		</dict>
+		<key>VoodooGPIOTigerLakeLP</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOClass</key>
+			<string>VoodooGPIOTigerLakeLP</string>
+			<key>IONameMatch</key>
 			<array>
-				<string>INT344B</string>
+				<string>INT34C5</string>
+				<string>INTC1055</string>
 			</array>
 			<key>IOProviderClass</key>
 			<string>IOService</string>
@@ -63,7 +143,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2017 CoolStar. All rights reserved.</string>
 	<key>OSBundleCompatibleVersion</key>
-	<string>1.2</string>
+	<string>1.3</string>
 	<key>OSBundleLibraries</key>
 	<dict>
 		<key>com.apple.iokit.IOACPIFamily</key>

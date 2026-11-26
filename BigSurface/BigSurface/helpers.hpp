@@ -19,7 +19,9 @@
 #define kIOPMPowerOff                       0
 #define kIOPMNumberPowerStates              2
 
+#ifndef BIT
 #define BIT(nr) (1UL << (nr))
+#endif
 
 #ifndef GENMASK
 #define GENMASK(h, l) (((~0UL) << (l)) & (~0UL >> (64 - 1 - (h))))

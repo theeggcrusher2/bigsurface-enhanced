@@ -19,7 +19,9 @@
 #define kIOPMPowerOff                       0
 #define kIOPMNumberPowerStates              2
 
+#ifndef BIT
 #define BIT(nr) (1UL << (nr))
+#endif
 
 #define AbsoluteTime_to_scalar(x)    (*(uint64_t *)(x))
 
@@ -32,7 +34,6 @@
 #define LPSS_PRIV_RESETS_FUNC       0x3
 #define LPSS_PRIV_RESETS_IDMA       BIT(2)
 #define LPSS_PRIV_REMAP_ADDR        0x40
-#define LPSS_PRIVATE_CLOCK_GATING   0x800
 
 inline const char* getMatchedName(IOService* provider) {
     OSData* data = OSDynamicCast(OSData, provider->getProperty("name"));
@@ -55,6 +56,10 @@ static IOPMPowerState myIOPMPowerStates[kIOPMNumberPowerStates] = {
     {1, kIOPMPowerOff, kIOPMPowerOff, kIOPMPowerOff, 0, 0, 0, 0, 0, 0, 0, 0},
     {1, kIOPMPowerOn, kIOPMPowerOn, kIOPMPowerOn, 0, 0, 0, 0, 0, 0, 0, 0}
 };
+
+// Names used by the upstream VoodooI2C sources, so they can be synced verbatim.
+#define kVoodooI2CIOPMNumberPowerStates     kIOPMNumberPowerStates
+#define VoodooI2CIOPMPowerStates            myIOPMPowerStates
 
 #define LOG(str, ...)   IOLog("%s::" str "\n", getName(), ##__VA_ARGS__)
 
