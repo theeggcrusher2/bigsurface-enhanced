@@ -13,6 +13,23 @@
 
 class SurfaceHIDDevice;
 
+#define SURFACE_HID_REPORT_QUEUE_LEN    16
+#define SURFACE_HID_MAX_REPORT_LEN      256
+
+/*
+ * Reports arrive on the SSH work loop and are handed to IOHIDDevice on ours. Queue them
+ * so that several reports received in one UART poll are neither lost nor reordered
+ * (a lost keyboard report means a dropped key press or a stuck key).
+ */
+struct SurfaceHIDReportQueue {
+    IOSimpleLock* lock {nullptr};
+    UInt8   head {0};
+    UInt8   count {0};
+    bool    overflow {false};
+    UInt16  length[SURFACE_HID_REPORT_QUEUE_LEN];
+    UInt8   data[SURFACE_HID_REPORT_QUEUE_LEN][SURFACE_HID_MAX_REPORT_LEN];
+};
+
 class EXPORT SurfaceHIDDriver : public IOService {
 	OSDeclareDefaultStructors(SurfaceHIDDriver)
 
@@ -46,6 +63,16 @@ private:
     
     IOBufferMemoryDescriptor* kbd_report {nullptr};
     IOBufferMemoryDescriptor* tpd_report {nullptr};
+    SurfaceHIDReportQueue*    kbd_queue {nullptr};
+    SurfaceHIDReportQueue*    tpd_queue {nullptr};
+
+    static SurfaceHIDReportQueue *createQueue();
+
+    static void destroyQueue(SurfaceHIDReportQueue **queue);
+
+    bool enqueueReport(SurfaceHIDReportQueue *queue, UInt8 *buffer, UInt16 len);
+
+    void deliverReports(SurfaceHIDReportQueue *queue, IOBufferMemoryDescriptor *report, SurfaceHIDDevice *device);
     
     void eventReceived(SurfaceHIDNub *sender, SurfaceHIDDeviceType device, UInt8 *buffer, UInt16 len);
     

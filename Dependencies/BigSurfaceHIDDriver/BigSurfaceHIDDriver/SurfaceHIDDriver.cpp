@@ -12,23 +12,90 @@
 #define super IOService
 OSDefineMetaClassAndStructors(SurfaceHIDDriver, IOService)
 
+SurfaceHIDReportQueue *SurfaceHIDDriver::createQueue() {
+    SurfaceHIDReportQueue *queue = IONew(SurfaceHIDReportQueue, 1);
+    if (!queue)
+        return nullptr;
+    memset(queue, 0, sizeof(SurfaceHIDReportQueue));
+    queue->lock = IOSimpleLockAlloc();
+    if (!queue->lock) {
+        IODelete(queue, SurfaceHIDReportQueue, 1);
+        return nullptr;
+    }
+    return queue;
+}
+
+void SurfaceHIDDriver::destroyQueue(SurfaceHIDReportQueue **queue) {
+    if (!*queue)
+        return;
+    IOSimpleLockFree((*queue)->lock);
+    IODelete(*queue, SurfaceHIDReportQueue, 1);
+    *queue = nullptr;
+}
+
+bool SurfaceHIDDriver::enqueueReport(SurfaceHIDReportQueue *queue, UInt8 *buffer, UInt16 len) {
+    if (!queue || !len)
+        return false;
+    if (len > SURFACE_HID_MAX_REPORT_LEN) {
+        LOG("HID report too long (%d bytes), dropped", len);
+        return false;
+    }
+    IOSimpleLockLock(queue->lock);
+    if (queue->count == SURFACE_HID_REPORT_QUEUE_LEN) {
+        // Should not happen, drop the oldest report so the latest state wins
+        queue->head = (queue->head + 1) % SURFACE_HID_REPORT_QUEUE_LEN;
+        queue->count--;
+        queue->overflow = true;
+    }
+    UInt8 slot = (queue->head + queue->count) % SURFACE_HID_REPORT_QUEUE_LEN;
+    memcpy(queue->data[slot], buffer, len);
+    queue->length[slot] = len;
+    queue->count++;
+    IOSimpleLockUnlock(queue->lock);
+    return true;
+}
+
+void SurfaceHIDDriver::deliverReports(SurfaceHIDReportQueue *queue, IOBufferMemoryDescriptor *report, SurfaceHIDDevice *device) {
+    if (!queue || !report || !device)
+        return;
+    while (true) {
+        bool overflow;
+        IOSimpleLockLock(queue->lock);
+        if (!queue->count) {
+            IOSimpleLockUnlock(queue->lock);
+            break;
+        }
+        UInt8 slot = queue->head;
+        UInt16 len = queue->length[slot];
+        report->setLength(len);
+        report->writeBytes(0, queue->data[slot], len);
+        queue->head = (queue->head + 1) % SURFACE_HID_REPORT_QUEUE_LEN;
+        queue->count--;
+        overflow = queue->overflow;
+        queue->overflow = false;
+        IOSimpleLockUnlock(queue->lock);
+
+        if (overflow)
+            LOG("HID report queue overflow, reports lost!");
+        if (device->handleReport(report) != kIOReturnSuccess)
+            LOG("Handle %s report error!", device->device_name);
+    }
+}
+
 void SurfaceHIDDriver::eventReceived(SurfaceHIDNub *sender, SurfaceHIDDeviceType device, UInt8 *buffer, UInt16 len) {
+    // Called on the SSH work loop: queue the report and handle it on our own work loop
     if (!ready)
         return;
     
     switch (device) {
         case SurfaceLegacyKeyboardDevice:
         case SurfaceKeyboardDevice:
-            kbd_report->setLength(len);
-            kbd_report->writeBytes(0, buffer, len);
-            kbd_interrupt->interruptOccurred(nullptr, this, 0);
+            if (enqueueReport(kbd_queue, buffer, len))
+                kbd_interrupt->interruptOccurred(nullptr, this, 0);
             break;
         case SurfaceTouchpadDevice:
-            if (!legacy) {
-                tpd_report->setLength(len);
-                tpd_report->writeBytes(0, buffer, len);
+            if (!legacy && enqueueReport(tpd_queue, buffer, len))
                 tpd_interrupt->interruptOccurred(nullptr, this, 0);
-            }
             break;
         default:
             DBG_LOG("WTF? Unknown event type %d", device);
@@ -37,13 +104,11 @@ void SurfaceHIDDriver::eventReceived(SurfaceHIDNub *sender, SurfaceHIDDeviceType
 }
 
 void SurfaceHIDDriver::keyboardInputReceived(IOInterruptEventSource *sender, int count) {
-    if (keyboard->handleReport(kbd_report) != kIOReturnSuccess)
-        LOG("Handle keyboard report error!");
+    deliverReports(kbd_queue, kbd_report, keyboard);
 }
 
 void SurfaceHIDDriver::touchpadInputReceived(IOInterruptEventSource *sender, int count) {
-    if (touchpad->handleReport(tpd_report) != kIOReturnSuccess)
-        LOG("Handle touchpad report error!");
+    deliverReports(tpd_queue, tpd_report, touchpad);
 }
 
 IOService *SurfaceHIDDriver::probe(IOService *provider, SInt32 *score) {
@@ -97,7 +162,12 @@ bool SurfaceHIDDriver::start(IOService *provider) {
         LOG("Could not start keyboard device");
         goto exit;
     }
-    kbd_report = IOBufferMemoryDescriptor::withCapacity(32, kIODirectionNone);
+    kbd_report = IOBufferMemoryDescriptor::withCapacity(SURFACE_HID_MAX_REPORT_LEN, kIODirectionNone);
+    kbd_queue = createQueue();
+    if (!kbd_report || !kbd_queue) {
+        LOG("Could not allocate keyboard report buffers");
+        goto exit;
+    }
     kbd_interrupt = IOInterruptEventSource::interruptEventSource(this, OSMemberFunctionCast(IOInterruptEventAction, this, &SurfaceHIDDriver::keyboardInputReceived));
     if (!kbd_interrupt) {
         LOG("Could not create keyboard interrupt event!");
@@ -123,7 +193,12 @@ bool SurfaceHIDDriver::start(IOService *provider) {
             LOG("Could not start Surface touchpad device");
             goto exit;
         }
-        tpd_report = IOBufferMemoryDescriptor::withCapacity(32, kIODirectionNone);
+        tpd_report = IOBufferMemoryDescriptor::withCapacity(SURFACE_HID_MAX_REPORT_LEN, kIODirectionNone);
+        tpd_queue = createQueue();
+        if (!tpd_report || !tpd_queue) {
+            LOG("Could not allocate touchpad report buffers");
+            goto exit;
+        }
         tpd_interrupt = IOInterruptEventSource::interruptEventSource(this, OSMemberFunctionCast(IOInterruptEventAction, this, &SurfaceHIDDriver::touchpadInputReceived));
         if (!tpd_interrupt) {
             LOG("Could not create touchpad interrupt event!");
@@ -146,6 +221,8 @@ void SurfaceHIDDriver::stop(IOService *provider) {
 }
 
 void SurfaceHIDDriver::releaseResources() {
+    // No more events after unregistering: it is serialised with event delivery by the SSH gate
+    ready = false;
     nub->unregisterHIDEvent(this);
     if (kbd_interrupt) {
         kbd_interrupt->disable();
@@ -161,6 +238,8 @@ void SurfaceHIDDriver::releaseResources() {
     
     OSSafeReleaseNULL(kbd_report);
     OSSafeReleaseNULL(tpd_report);
+    destroyQueue(&kbd_queue);
+    destroyQueue(&tpd_queue);
     
     if (keyboard) {
         keyboard->stop(this);
