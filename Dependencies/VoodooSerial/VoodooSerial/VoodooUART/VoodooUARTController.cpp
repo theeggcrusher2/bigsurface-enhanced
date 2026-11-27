@@ -166,6 +166,8 @@ IOReturn VoodooUARTController::initDevice() {
 }
 
 void VoodooUARTController::configDevice() {
+    if (!device.mmap)
+        return;
     writeRegister(0, LPSS_PRIV + LPSS_PRIV_RESETS); // reset device
     writeRegister(LPSS_PRIV_RESETS_FUNC | LPSS_PRIV_RESETS_IDMA, LPSS_PRIV + LPSS_PRIV_RESETS); // deassert reset
 
@@ -401,7 +403,7 @@ bool VoodooUARTController::matchesACPIPath(const char *resource_source) {
 }
 
 IOReturn VoodooUARTController::setPowerState(unsigned long whichState, IOService* whatDevice) {
-    if (whatDevice != this)
+    if (whatDevice != this || !command_gate)
         return kIOPMAckImplied;
 
     // ensure that we are not in the middle of a data transmission or interrupt
@@ -422,12 +424,15 @@ IOReturn VoodooUARTController::setPowerStateGated(unsigned long *whichState) {
         }
     } else {
         if (device.state == UART_SLEEP) {
-            if (initDevice() != kIOReturnSuccess)
-                LOG("Initialise device failed!");
+            if (initDevice() != kIOReturnSuccess) {
+                // Stay in UART_SLEEP: nothing is mapped, every request fails with kIOReturnNotReady
+                LOG("Initialise device failed after wake, UART unusable until the next wake!");
+                return kIOPMAckImplied;
+            }
             configDevice();
             device.state = UART_IDLE;
-            if (target)
-                prepareCommunication();
+            if (target && prepareCommunication() != kIOReturnSuccess)
+                LOG("Failed to reopen the UART after wake!");
             DBG_LOG("Woke up");
         }
     }
@@ -439,6 +444,8 @@ IOReturn VoodooUARTController::requestConnect(OSObject *owner, MessageHandler _h
         return kIOReturnNoResources;
     if (!owner || !_handler)
         return kIOReturnError;
+    if (!command_gate)
+        return kIOReturnNotReady;
 
     target = owner;
     handler = _handler;
@@ -459,7 +466,8 @@ IOReturn VoodooUARTController::requestConnect(OSObject *owner, MessageHandler _h
 
 void VoodooUARTController::requestDisconnect(OSObject *owner) {
     if (target == owner) {
-        command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &VoodooUARTController::stopCommunication));
+        if (command_gate)
+            command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &VoodooUARTController::stopCommunication));
         target = nullptr;
         handler = nullptr;
     }
@@ -468,6 +476,8 @@ void VoodooUARTController::requestDisconnect(OSObject *owner) {
 IOReturn VoodooUARTController::prepareCommunication() {
     if (ready)
         return kIOReturnStillOpen;
+    if (device.state == UART_SLEEP || !device.mmap)
+        return kIOReturnNotReady;
 
     UInt16 divisor = 1;
     UInt32 lcr = 0;
@@ -514,20 +524,20 @@ IOReturn VoodooUARTController::prepareCommunication() {
     if (bus.flow_control) {
         mcr |= UART_MCR_RTS | UART_MCR_AFC;
         writeRegister(mcr, DW_UART_MCR);
+        bool cts = false;
         for (int tries=0; tries < 100; tries++) {   // 10ms in total
             if (readRegister(DW_UART_MSR) & UART_MSR_CTS) {
                 DBG_LOG("Received Clear To Send signal!");
-                ready = true;
+                cts = true;
                 break;
             }
             IODelay(100);
         }
-        if (!ready) {
-            LOG("Warning! Timeout waiting for UART to be ready!");
-            return kIOReturnAborted;
-        }
-    } else
-        ready = true;
+        // With auto flow control the hardware holds transmission until CTS, so carry on
+        if (!cts)
+            LOG("Warning! No Clear To Send from the device yet");
+    }
+    ready = true;
 
     if (bus.flow_control)
         toggleInterruptType(UART_IER_ENABLE_MODEM_STA_INT, true);
@@ -607,6 +617,8 @@ IOReturn VoodooUARTController::transmitData(UInt8 *buffer, UInt16 length) {
     IOReturn ret = kIOReturnSuccess;
     if (!buffer || !length)
         return kIOReturnBadArgument;
+    if (!command_gate)
+        return kIOReturnNotReady;
     for (int tries=0; tries < 5; tries++) {
         if (!ready)
             return kIOReturnNotReady;
@@ -630,7 +642,7 @@ IOReturn VoodooUARTController::transmitDataGated(UInt8* buffer, UInt16* length) 
     if (bus.tx_buffer_len)
         return kIOReturnBusy;
 
-    nanoseconds_to_absolutetime(UART_TX_TIMEOUT_NS, &abstime);
+    nanoseconds_to_absolutetime(UART_TX_TIMEOUT_NS + (UInt64)(*length / fifo_size + 1) * 2 * UART_ACTIVE_TIMEOUT * 1000000ULL, &abstime);
     clock_absolutetime_interval_to_deadline(abstime, &deadline);
 
     bus.tx_buffer = buffer;
