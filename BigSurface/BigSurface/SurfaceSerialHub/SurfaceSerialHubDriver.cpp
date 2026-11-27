@@ -88,12 +88,23 @@ static void err_dump(const char *name, const char *str, const UInt8 *buffer, UIn
 
 #pragma mark - Receive path
 
+void SurfaceSerialHubDriver::setAwake(bool state) {
+    // Under the FIFO lock so that no bytes are queued after flushGated() emptied it
+    IOSimpleLockLock(rx_fifo_lock);
+    awake = state;
+    IOSimpleLockUnlock(rx_fifo_lock);
+}
+
 void SurfaceSerialHubDriver::bufferReceived(VoodooUARTController *sender, UInt8 *buffer, UInt16 length) {
-    if (!awake || !length)
+    if (!length)
         return;
 
     // Runs on the UART work loop: only queue the bytes, they are parsed on our work loop
     IOSimpleLockLock(rx_fifo_lock);
+    if (!awake) {
+        IOSimpleLockUnlock(rx_fifo_lock);
+        return;
+    }
     UInt32 space = SSH_RX_FIFO_SIZE - rx_fifo_count;
     if (length > space) {
         rx_fifo_overrun = true;
@@ -109,6 +120,9 @@ void SurfaceSerialHubDriver::bufferReceived(VoodooUARTController *sender, UInt8 
 }
 
 void SurfaceSerialHubDriver::processReceivedBuffer(IOInterruptEventSource *sender, int count) {
+    // A provider-less interrupt event source cannot be disabled, so check here
+    if (!awake)
+        return;
     bool overrun = false;
     do {
         IOSimpleLockLock(rx_fifo_lock);
@@ -225,13 +239,14 @@ void SurfaceSerialHubDriver::processFrame(UInt8 *message, UInt16 length) {
     switch (msg->frame.type) {
         case SSH_FRAME_TYPE_ACK:
             if (tx_inflight && tx_inflight->seq_id == msg->frame.seq_id)
-                completeInflightPacket();
+                completeInflightPacket(true);
             else
                 DBG_LOG("Warning, no pending packet found for ACK with seq_id %d", msg->frame.seq_id);
             break;
         case SSH_FRAME_TYPE_NAK:
             LOG("Warning, NAK received! Resending pending packet");
-            if (tx_inflight)
+            // Out of tries: the last transmission may still be ACKed, leave it to the timeout
+            if (tx_inflight && tx_inflight->tries < SSH_MAX_PACKET_TRIES)
                 retransmit_timer->setTimeoutUS(1);
             break;
         case SSH_FRAME_TYPE_DATA_SEQ:
@@ -425,6 +440,13 @@ IOReturn SurfaceSerialHubDriver::submitRequestGated(Request *rq) {
         w.buffer_len = rq->buffer_len;
         enqueue(&waiting_list, &w.entry);
         w.queued = true;
+        /*
+         * Like Linux, the response timeout only starts once the packet was ACKed; until then
+         * the request may wait behind other packets and their retransmissions.
+         */
+        w.acked = !rq->seq;
+        clock_interval_to_deadline(rq->seq ? SSH_PACKET_TIMEOUT : SSH_RESPONSE_TIMEOUT, kMillisecondScale, &w.deadline);
+        pkt->waiter = &w;
     }
 
     if (rq->seq) {
@@ -446,13 +468,17 @@ IOReturn SurfaceSerialHubDriver::submitRequestGated(Request *rq) {
     if (!rq->wait)
         return kIOReturnSuccess;
 
-    AbsoluteTime deadline;
-    clock_interval_to_deadline(SSH_RESPONSE_TIMEOUT, kMillisecondScale, &deadline);
-    // Ends when the response arrived, or flushGated() dropped the request (going to sleep)
-    while (!w.completed && w.queued) {
-        if (command_gate->commandSleep(&w, deadline, THREAD_UNINT) == THREAD_TIMED_OUT)
-            break;
+    // Ends when the response arrived, the packet was given up, or flushGated() dropped the request
+    while (!w.completed && w.queued && !w.tx_failed) {
+        // The deadline moves when the packet is ACKed, which also wakes us up
+        if (command_gate->commandSleep(&w, w.deadline, THREAD_UNINT) == THREAD_TIMED_OUT) {
+            UInt64 now;
+            clock_get_uptime(&now);
+            if (now >= w.deadline)
+                break;
+        }
     }
+    detachWaiter(&w);
     if (!w.completed) {
         if (w.queued)
             remqueue(&w.entry);
@@ -460,6 +486,25 @@ IOReturn SurfaceSerialHubDriver::submitRequestGated(Request *rq) {
     }
     rq->received_len = w.received_len;
     return kIOReturnSuccess;
+}
+
+void SurfaceSerialHubDriver::detachWaiter(WaitingRequest *w) {
+    // The waiter lives on the stack of submitRequestGated(), no packet may keep pointing to it
+    if (tx_inflight && tx_inflight->waiter == w)
+        tx_inflight->waiter = nullptr;
+    Packet *pkt;
+    qe_foreach_element_safe(pkt, &tx_queue, entry) {
+        if (pkt->waiter != w)
+            continue;
+        if (w->completed) {
+            pkt->waiter = nullptr;
+        } else {
+            // Nobody waits for it any more, do not send it (a retry queues a fresh one)
+            remqueue(&pkt->entry);
+            delete[] pkt->buffer;
+            delete pkt;
+        }
+    }
 }
 
 void SurfaceSerialHubDriver::transmitNextPacket() {
@@ -474,8 +519,17 @@ void SurfaceSerialHubDriver::transmitNextPacket() {
     }
 }
 
-void SurfaceSerialHubDriver::completeInflightPacket() {
+void SurfaceSerialHubDriver::completeInflightPacket(bool acked) {
     retransmit_timer->cancelTimeout();
+    WaitingRequest *w = tx_inflight->waiter;
+    if (w) {
+        if (acked) {
+            w->acked = true;
+            clock_interval_to_deadline(SSH_RESPONSE_TIMEOUT, kMillisecondScale, &w->deadline);
+        } else
+            w->tx_failed = true;
+        command_gate->commandWakeup(w);
+    }
     delete[] tx_inflight->buffer;
     delete tx_inflight;
     tx_inflight = nullptr;
@@ -490,7 +544,7 @@ void SurfaceSerialHubDriver::retransmitTimeout(IOTimerEventSource *timer) {
     if (pkt->tries >= SSH_MAX_PACKET_TRIES) {
         SurfaceSerialCommand *cmd = reinterpret_cast<SurfaceSerialCommand *>(pkt->buffer + SSH_MSG_LEN_HEADER);
         LOG("Receive no ACK for command tc %x, tid %x, cid %x, iid %x!", cmd->target_category, cmd->target_id_out, cmd->command_id, cmd->instance_id);
-        completeInflightPacket();   // give up, a waiting request will time out
+        completeInflightPacket(false);   // give up, a waiting request fails right away
         return;
     }
 
@@ -520,14 +574,22 @@ IOReturn SurfaceSerialHubDriver::registerHandlerGated(EventHandler *h, bool *exi
     return kIOReturnSuccess;
 }
 
-IOReturn SurfaceSerialHubDriver::unregisterHandlerGated(SurfaceSerialHubClient *client, UInt8 *tc, UInt8 *iid, EventHandler **removed) {
+IOReturn SurfaceSerialHubDriver::unregisterHandlerGated(EventHandler *key, EventHandler **removed, bool *still_used) {
     *removed = nullptr;
+    *still_used = false;
     EventHandler *h;
-    qe_foreach_element_safe(h, &event_handler_lists[*tc], entry) {
-        if (h->client == client && (h->target_iid == *iid || *iid == 0)) {
+    qe_foreach_element_safe(h, &event_handler_lists[key->tc], entry) {
+        if (h->client == key->client && (h->target_iid == key->target_iid || key->target_iid == 0)) {
             remqueue(&h->entry);
             *removed = h;
             break;
+        }
+    }
+    // SAM keeps one registration per event, only disable it when the last user is gone
+    if (*removed) {
+        qe_foreach_element(h, &event_handler_lists[key->tc], entry) {
+            if (h->type == (*removed)->type && h->target_iid == (*removed)->target_iid)
+                *still_used = true;
         }
     }
     return kIOReturnSuccess;
@@ -562,7 +624,8 @@ IOReturn SurfaceSerialHubDriver::registerEvent(SurfaceSerialHubClient *client, S
         IOReturn ret = sendEventCommand(type, tc, iid, true);
         if (ret != kIOReturnSuccess) {
             EventHandler *removed = nullptr;
-            command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::unregisterHandlerGated), client, &tc, &iid, &removed);
+            bool still_used = false;
+            command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::unregisterHandlerGated), h, &removed, &still_used);
             if (removed)
                 delete removed;
             return ret;
@@ -576,10 +639,15 @@ void SurfaceSerialHubDriver::unregisterEvent(SurfaceSerialHubClient *client, Sur
         return;
 
     if (client) {
+        EventHandler key = {};
+        key.client = client;
+        key.tc = tc;
+        key.target_iid = iid;
         EventHandler *removed = nullptr;
-        command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::unregisterHandlerGated), client, &tc, &iid, &removed);
+        bool still_used = false;
+        command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::unregisterHandlerGated), &key, &removed, &still_used);
         if (removed) {
-            if (tc != 0)
+            if (tc != 0 && !still_used)
                 sendEventCommand(removed->type, tc, removed->target_iid, false);
             delete removed;
         }
@@ -606,7 +674,7 @@ IOReturn SurfaceSerialHubDriver::sendEventCommand(SurfaceSerialEventRegistryType
     return kIOReturnSuccess;
 }
 
-void SurfaceSerialHubDriver::restoreEvents() {
+void SurfaceSerialHubDriver::restoreEvents(IOTimerEventSource *sender) {
     /*
      * SAM may lose its event registrations while the system is asleep (e.g. after
      * hibernation), re-enable everything our clients registered. Like Linux'
@@ -713,6 +781,13 @@ bool SurfaceSerialHubDriver::start(IOService *provider) {
     }
     work_loop->addEventSource(retransmit_timer);
 
+    restore_timer = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SurfaceSerialHubDriver::restoreEvents));
+    if (!restore_timer) {
+        LOG("Could not create event restore timer!");
+        goto exit;
+    }
+    work_loop->addEventSource(restore_timer);
+
     publish_timer = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &SurfaceSerialHubDriver::delayedPublishingNubs));
     if (!publish_timer) {
         LOG("Could not create timer for publishing nubs!");
@@ -772,11 +847,25 @@ exit:
     return false;
 }
 
+IOReturn SurfaceSerialHubDriver::beginStopGated() {
+    // The nubs are started by hand from the publish timer, so IOKit does not serialise
+    // that with our termination: let a running publication finish first.
+    stopping = true;
+    while (publishing)
+        command_gate->commandSleep(&publishing, THREAD_UNINT);
+    return kIOReturnSuccess;
+}
+
 void SurfaceSerialHubDriver::stop(IOService *provider) {
+    command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::beginStopGated));
+    publish_timer->cancelTimeout();
+    restore_timer->cancelTimeout();
     if (awake) {
         notifySAM(SSH_CID_SAM_DISPLAY_OFF, "display-off");
         notifySAM(SSH_CID_SAM_D0_EXIT, "D0-exit");
     }
+    // From here on requests fail at once instead of timing out and retrying
+    setAwake(false);
     uart_controller->requestDisconnect(this);
 
     PMstop();
@@ -839,20 +928,22 @@ IOReturn SurfaceSerialHubDriver::setPowerState(unsigned long whichState, IOServi
         return kIOReturnInvalid;
     if (whichState == 0) {
         if (awake) {
+            restore_timer->cancelTimeout();
             notifySAM(SSH_CID_SAM_DISPLAY_OFF, "display-off");
             notifySAM(SSH_CID_SAM_D0_EXIT, "D0-exit");
-            awake = false;
-            uart_interrupt->disable();
+            setAwake(false);
             command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::flushGated));
             DBG_LOG("Going to sleep");
         }
     } else {
-        if (!awake) {
-            uart_interrupt->enable();
-            awake = true;
+        if (!awake && !stopping) {
+            // Start from a clean receive state, nothing is queued while asleep
+            command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::flushGated));
+            setAwake(true);
             notifySAM(SSH_CID_SAM_D0_ENTRY, "D0-entry");
             notifySAM(SSH_CID_SAM_DISPLAY_ON, "display-on");
-            restoreEvents();
+            // Re-enabling the events may take a while if SAM is slow, keep it off the PM thread
+            restore_timer->setTimeoutMS(1);
             DBG_LOG("Woke up");
         }
     }
@@ -893,6 +984,12 @@ void SurfaceSerialHubDriver::releaseResources() {
         publish_timer->disable();
         work_loop->removeEventSource(publish_timer);
         OSSafeReleaseNULL(publish_timer);
+    }
+    if (restore_timer) {
+        restore_timer->cancelTimeout();
+        restore_timer->disable();
+        work_loop->removeEventSource(restore_timer);
+        OSSafeReleaseNULL(restore_timer);
     }
     if (retransmit_timer) {
         retransmit_timer->cancelTimeout();
@@ -1025,31 +1122,43 @@ void SurfaceSerialHubDriver::detectFeatures() {
 }
 
 void SurfaceSerialHubDriver::delayedPublishingNubs(IOTimerEventSource *sender) {
-    battery_nub = OSTypeAlloc(SurfaceBatteryNub);
-    if (!battery_nub || !battery_nub->init() || !battery_nub->attach(this)) {
+    // Runs with the gate held; the nubs' start() drops it while waiting for SAM
+    if (stopping)
+        return;
+    publishing = true;
+
+    SurfaceBatteryNub *battery = OSTypeAlloc(SurfaceBatteryNub);
+    if (!battery || !battery->init() || !battery->attach(this)) {
         LOG("Failed to init Surface Battery nub!");
-        OSSafeReleaseNULL(battery_nub);
+        OSSafeReleaseNULL(battery);
     } else {
-        if (!battery_nub->start(this)) {
+        if (!battery->start(this)) {
             LOG("Failed to attach Surface Battery nub!");
-            battery_nub->detach(this);
-            OSSafeReleaseNULL(battery_nub);
+            battery->detach(this);
+            OSSafeReleaseNULL(battery);
         } else
             DBG_LOG("Surface Battery nub published!");
     }
+    battery_nub = battery;  // terminated in releaseResources() even if we are stopping now
 
-    hid_nub = OSTypeAlloc(SurfaceHIDNub);
-    if (!hid_nub || !hid_nub->init() || !hid_nub->attach(this)) {
-        LOG("Failed to init Surface HID nub!");
-        OSSafeReleaseNULL(hid_nub);
-    } else {
-        if (!hid_nub->start(this)) {
-            LOG("Failed to attach Surface HID nub! Ignore this if you don't need HID nub");
-            hid_nub->detach(this);
-            OSSafeReleaseNULL(hid_nub);
-        } else
-            DBG_LOG("Surface HID nub published!");
+    if (!stopping) {
+        SurfaceHIDNub *hid = OSTypeAlloc(SurfaceHIDNub);
+        if (!hid || !hid->init() || !hid->attach(this)) {
+            LOG("Failed to init Surface HID nub!");
+            OSSafeReleaseNULL(hid);
+        } else {
+            if (!hid->start(this)) {
+                LOG("Failed to attach Surface HID nub! Ignore this if you don't need HID nub");
+                hid->detach(this);
+                OSSafeReleaseNULL(hid);
+            } else
+                DBG_LOG("Surface HID nub published!");
+        }
+        hid_nub = hid;
     }
+
+    publishing = false;
+    command_gate->commandWakeup(&publishing);
 }
 
 #pragma mark - GPIO wake interrupt

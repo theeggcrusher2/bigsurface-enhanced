@@ -45,9 +45,10 @@ enum SurfaceSAMFeature : UInt32 {
 #define SSH_RX_FIFO_SIZE        4096                // bytes buffered between UART and parser
 #define SSH_RX_BUF_SIZE         2048                // largest message the parser accepts
 
-#define SSH_ACK_TIMEOUT         100                 // ms until an un-ACKed packet is resent
+#define SSH_ACK_TIMEOUT         250                 // ms until an un-ACKed packet is resent
 #define SSH_MAX_PACKET_TRIES    3
-#define SSH_RESPONSE_TIMEOUT    1000                // ms until a request without response fails
+#define SSH_PACKET_TIMEOUT      3000                // ms a request may wait in the queue and for its ACK
+#define SSH_RESPONSE_TIMEOUT    1000                // ms after the ACK until a request without response fails
 #define SSH_REQUEST_TRIES       3                   // attempts for a request that timed out
 #define SSH_NUB_PUBLISH_DELAY   20000               // ms, overridable with "NubPublishDelay"
 
@@ -135,12 +136,15 @@ private:
         }
     };
 
+    struct WaitingRequest;
+
     struct Packet {
-        queue_entry entry;
+        queue_entry entry;          // must stay the first member (queue_remove_first)
         UInt8*  buffer {nullptr};
         UInt16  len {0};
         UInt8   seq_id {0};
         UInt8   tries {0};
+        WaitingRequest* waiter {nullptr};   // request waiting for the response, if any
     };
 
     struct Request {
@@ -166,6 +170,9 @@ private:
         UInt16  received_len;
         bool    completed;
         bool    queued;
+        bool    acked;          // the packet carrying the request was ACKed
+        bool    tx_failed;      // ... or given up without ACK
+        UInt64  deadline;
     };
 
     struct EventKey {
@@ -186,6 +193,7 @@ private:
     IOCommandGate*          command_gate {nullptr};
     IOTimerEventSource*     publish_timer {nullptr};
     IOTimerEventSource*     retransmit_timer {nullptr};
+    IOTimerEventSource*     restore_timer {nullptr};
     IOInterruptEventSource* uart_interrupt {nullptr};
     IOInterruptEventSource* gpio_interrupt {nullptr};
     IOACPIPlatformDevice*   acpi_device {nullptr};
@@ -194,7 +202,9 @@ private:
     SurfaceBatteryNub*      battery_nub {nullptr};
     SurfaceHIDNub*          hid_nub {nullptr};
 
-    bool            awake {true};
+    bool            awake {true};       // changed under rx_fifo_lock
+    bool            publishing {false};
+    bool            stopping {false};
     UInt32          features {0};
     bool            known_model {false};
 
@@ -251,17 +261,23 @@ private:
 
     void transmitNextPacket();
 
-    void completeInflightPacket();
+    void completeInflightPacket(bool acked);
+
+    void detachWaiter(WaitingRequest *w);
 
     void retransmitTimeout(IOTimerEventSource *timer);
 
     IOReturn registerHandlerGated(EventHandler *h, bool *exists);
 
-    IOReturn unregisterHandlerGated(SurfaceSerialHubClient *client, UInt8 *tc, UInt8 *iid, EventHandler **removed);
+    IOReturn unregisterHandlerGated(EventHandler *key, EventHandler **removed, bool *still_used);
 
     IOReturn sendEventCommand(SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid, bool enable);
 
-    void restoreEvents();
+    void restoreEvents(IOTimerEventSource *sender);
+
+    void setAwake(bool state);
+
+    IOReturn beginStopGated();
 
     IOReturn collectEventsGated(EventKey *events, int *count);
 

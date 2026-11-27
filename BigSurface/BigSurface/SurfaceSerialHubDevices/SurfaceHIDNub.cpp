@@ -76,8 +76,12 @@ IOReturn SurfaceHIDNub::registerHIDEvent(OSObject* owner, EventHandler _handler)
         ret = ssh->registerEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_KBD, SurfaceLegacyKeyboardDevice);
     else {
         ret = ssh->registerEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice);
-        if (ret == kIOReturnSuccess)
+        if (ret == kIOReturnSuccess) {
             ret = ssh->registerEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceTouchpadDevice);
+            // Do not leave the keyboard registered, a later attempt would see it as a duplicate
+            if (ret != kIOReturnSuccess)
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice);
+        }
     }
     if (ret != kIOReturnSuccess)
         return ret;

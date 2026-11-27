@@ -16,6 +16,7 @@
 
 #define SURFACE_TEMP_SENSOR_MAX         16
 #define SURFACE_TEMP_SENSOR_NAME_LEN    18
+#define SURFACE_BAT_TEMP_MAX_FAILURES   3
 
 /* Equivalent to data returned in ACPI _BIX method, revision 0 (see Linux surface_battery.c) */
 struct PACKED SurfaceBatteryBIX {
@@ -147,6 +148,7 @@ private:
     EventHandler            handler {nullptr};
 
     UInt16  temp_sensors {0};
+    UInt8   bat_temp_failures {0};
     char    temp_sensor_names[SURFACE_TEMP_SENSOR_MAX][SURFACE_TEMP_SENSOR_NAME_LEN];
 
     void probeTemperatureSensors();

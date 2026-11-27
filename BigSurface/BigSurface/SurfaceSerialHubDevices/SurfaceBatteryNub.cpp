@@ -220,11 +220,17 @@ IOReturn SurfaceBatteryNub::getBatteryStatus(UInt8 index, UInt32 *bst, UInt16 *t
     if (ssh->getResponse(SSH_TC_BAT, index, 0x01, SSH_CID_BAT_BST, nullptr, 0, true, reinterpret_cast<UInt8 *>(bst), BST_LENGTH) != kIOReturnSuccess)
         return kIOReturnError;
 
-    // Skip the battery sensor if enumeration says it does not exist on this model
+    // Skip the battery sensor if enumeration says it does not exist on this model, or if it
+    // keeps failing: every failed query costs several request timeouts
     if (temp_sensors && !(temp_sensors & BIT(SSH_TEMP_SENSOR_BAT - 1)))
         return kIOReturnSuccess;
-    if (getTemperature(SSH_TEMP_SENSOR_BAT, temp) != kIOReturnSuccess)
-        DBG_LOG("Failed to get battery temperature!");
+    if (bat_temp_failures >= SURFACE_BAT_TEMP_MAX_FAILURES)
+        return kIOReturnSuccess;
+    if (getTemperature(SSH_TEMP_SENSOR_BAT, temp) != kIOReturnSuccess) {
+        if (++bat_temp_failures == SURFACE_BAT_TEMP_MAX_FAILURES)
+            LOG("Battery temperature not available, no longer querying it");
+    } else
+        bat_temp_failures = 0;
 
     return kIOReturnSuccess;
 }
